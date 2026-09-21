@@ -240,6 +240,17 @@
 - **踩坑**：`TextToolbarStatus` 在 Compose 1.7 是**枚举**（`Shown`/`Hidden` 是枚举常量，不带 rect 参数），不是 sealed class；`TextToolbarStatus.Shown(rect)` 编译报 Unresolved，应写 `TextToolbarStatus.Shown`。
 - versionCode 22→24（0.7.3）。
 
+### 2026-09-21 · 运维 接入本地服务管理器 + launcher 加 CLIP_NO_AUTOSTART 开关
+
+- **背景**：把 catcher 注册进本地服务管理器（`D:\MyProject\service-manager`，svcmgr 0.1.0）。配置 `config/projects/catcher.yaml`：项目 `catcher` 只含 **1 个**服务 `backend` = `dist\backend.exe` —— SQLite 是进程内嵌的、FFmpeg 是后端自己调用的工具，都不是服务；Android 端不在 PC 上。故无 `dependsOn`。
+- **关键参数**：`args: ["--autostart"]`（静默态，端口被占时直接退出，不弹模态框——管理器无人值守拉起必须用）；不写 `readiness`（全项目只有 `/api/v1/health` 一个探针端点，写 readiness 只是和 liveness 打同一 URL）；不写 `stop`（无 HTTP shutdown 端点，走默认 taskkill → 强杀进程树；SQLite 是 WAL，强杀不坏库）；不写 `env`（`CLIP_TOKEN` 必须保持默认否则手机端 token 失效；`PORT` 在 launcher.py 是硬编码常量，写进 env 不生效）。
+- **冲突与决策**：launcher.py 每次正常启动都幂等写 `HKCU\...\Run\ClipBackend`，登录时会**绕开管理器自己抢 8000**（2026-09-21 16:39 实测发生过一次：explorer 重启触发自启项拉起了非托管实例）。决策：给 launcher 加 **`CLIP_NO_AUTOSTART=1` 开关**，命中则跳过写自启；不设该变量（手动双击）行为完全不变。选 env 而非命令行 flag，因为管理器 YAML 里配 `env` 就能生效，不必改 `args`。
+- **配套**：服务管理器 YAML 改 `autoStart: true` + `env: CLIP_NO_AUTOSTART: "1"`，开机自启统一由管理器负责。
+- **顺带修 `--uninstall-autostart`**：去掉 3 处 `_msgbox`，改为 stdout 一行结果 + 退出码（0=成功或本就不存在，1=失败）。理由是模态框会阻塞调用方（脚本/管理器）。
+- **产物**：重打包 `dist\backend.exe`（653,324,409 字节 / 16:59:56）。**只跑 PyInstaller，跳过 `build.bat` 第 4 步**——它会 `rmtree` 掉 `dist/.cache` 再复制 1.5GB medium 模型，与本次改动无关；已验模型加载正常（14.2s），无副作用。
+- **git**：仓库此前不存在（catcher/backend/android 三处都无 `.git`），建基线 `9adfdda`（含 `.gitignore`，排除 .venv/dist/build/tools/data/.gradle；108 文件 / 0.41MB），改动 `1fe7378`。
+- **验证**：三条在打包后的 exe 上通过 —— ①不设变量→键出现（日志 `已写自启项 ClipBackend -> ...`）；②设 `=1`→键不出现（日志 `CLIP_NO_AUTOSTART=1，跳过写自启项`）；③`--uninstall-autostart` 自行退出 exit=0、键删除、无残留进程。**端到端**：管理器带 YAML 的 env 拉起，注册表保持干净。
+
 ---
 
 ## 决策日志
@@ -594,6 +605,14 @@ _（暂无，遇到后再填。这里专门放"改了好几次才定下来"的�
 - **坑 2（编译）**：`import androidx.lifecycle.ViewTreeLifecycleOwner` 报 Unresolved reference，但类明明在 classpath 上（javap 确认 public static、metadata mv=1.8.0 可读）。根因：这些类在 lifecycle 的 `-android` KMP 变体里，Kotlin 编译器对 -android 变体的元数据可见性有问题（Java 类如 LifecycleRegistry 能 import，Kotlin 类如 ViewTreeLifecycleOwner 不能）。解法：把 ViewTree owner 的调用放进 Java helper（javac 只看字节码），Kotlin 侧只调 helper。
 - **防止再犯**：KMP 库的 `-android` 变体里的 Kotlin 类，若 Kotlin import 报 Unresolved 但 javap 能看到 public 字节码，用 Java 中间层绕开。
 
+### 2026-09-21 · 误判 `--uninstall-autostart`「删不掉键、卡住」（服务管理器接入）
+
+- **现象**：测 `dist\backend.exe --uninstall-autostart` 时，注册表 `ClipBackend` 没被删、进程还活着卡在对话框。据此判定"这个卸载入口坏了、既删不掉键又阻塞调用方"，并把这个结论报给了用户。
+- **根因**：**测量早于事实**。PyInstaller onefile 要先解包才会跑真正的子进程（本包 653MB 带 CUDA DLL，实测 5~15 秒），而我在 +3~4 秒就查注册表，**并且把 bootloader 父进程 taskkill 了** → 子进程根本没机会执行删除。删除功能一直是好的。真正的缺陷只有"删完弹模态框阻塞调用方"这一条。
+- **澄清过程**：换个方式直连 `winreg.DeleteValue` 测原语，返回 `FileNotFoundError` —— 说明值**已经被那个"被我判死"的进程删掉了**，只是晚于我的检查。同一 exe、同一参数、观测时间不同，结论完全相反。
+- **解法**：等子进程真正跑完再判定 —— 用**健康 200 / 退出码**当同步点，别按秒数猜。
+- **防止再犯**：①本文件 2026-09-19「PyInstaller onefile + 无窗口 + 原生库」那条**已经写过这个问题**（"别 2 秒就 taskkill（会撞上还没解压完）"），我没先读就下结论 —— 改东西前先搜本文件有没有同类先例。②注册表"键不存在"这类**终态观测无法区分"抑制了写入"与"压根没走到写那段代码"**，必须配一条分支日志才能定论。
+
 ---
 
 ## 学到的东西
@@ -616,3 +635,5 @@ _（暂无，遇到后再填。这里专门放"改了好几次才定下来"的�
 - onefile 运行时会跑出父子两个 `backend.exe` 进程（bootloader 父 + 应用子），查进程/单实例测试要按"两个进程 = 一个实例"看。
 - `collect_all` 只收集"被 import"的包；faster-whisper 的模型不走包数据，靠 `HF_HOME` 指向 exe 旁 `.cache/huggingface`（build.bat 复制旧缓存可跳过 460MB 下载）。
 - 数据/工具/模型目录用 `sys.executable.parent` 定位是打包态唯一可靠锚点（`__file__` 会指向 `_MEIPASS` 临时目录）。
+- **更正 2026-09-19 条**：上面写"一次性命令要 ~1-3 秒"是低估。本包 onefile 653MB（含 CUDA DLL），实测**解包到子进程开始干活要 5~15 秒**。用"健康 200 / 退出码"当同步点，比按秒数猜稳。
+- **观测要能区分「没发生」和「没走到」**：注册表键、端口占用这类**终态观测，对"提前 return"和"正确抑制"长得一模一样**。判定一个开关是否生效，必须同时拿到一条能标明分支的日志，否则实验设计就是无效的（2026-09-21 被这个坑过一次）。
