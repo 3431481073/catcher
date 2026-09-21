@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 
-from .. import models
+from .. import events, models
 from ..auth import verify_token
 from ..errors import AppError, ok
 from ..schemas import CreateRecordRequest, PatchRecordRequest
@@ -54,6 +54,8 @@ async def create_record(req: CreateRecordRequest):
             type="video_analyze",
             status="skipped",
         )
+    # 事件只发在**真实创建**这条路径上：上面 local_id 幂等的提前 return 天然不发（重试不补发）
+    events.emit(record_id, "record_created")
     return ok(models.build_record_dto(record))
 
 
@@ -71,5 +73,10 @@ async def patch_record(record_id: str, req: PatchRecordRequest):
     if not record or record["deleted"]:
         raise AppError("NOT_FOUND", "记录不存在", 404)
     if req.append_note is not None:
-        models.append_note(record_id, req.append_note.id, req.append_note.text, req.append_note.time)
+        # 只在实际追加成功时发事件：PATCH 按 note id 幂等，手机端断网重试会重发同一个
+        # append_note，命中去重时不发，否则外部程序会对同一条备注重复加工。
+        if models.append_note(
+            record_id, req.append_note.id, req.append_note.text, req.append_note.time
+        ):
+            events.emit(record_id, "note_added")
     return ok(models.build_record_dto(models.get_record_by_id(record_id)))

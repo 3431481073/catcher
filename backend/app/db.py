@@ -44,6 +44,16 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_record ON tasks(record_id);
+
+CREATE TABLE IF NOT EXISTS events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_id   TEXT NOT NULL,
+  event_type  TEXT NOT NULL,           -- 自由字符串，不是固定枚举（见 app/events.py 顶部说明）
+  created_at  TEXT NOT NULL
+);
+
+-- 故意不给 events(id) 建索引：id 是 INTEGER PRIMARY KEY 即 rowid，SQLite 已为它维护 B-tree，
+-- 外部程序按 id 游标（WHERE id > ?）走的正是这棵树；再加一个同列索引只是重复占盘 + 拖慢 INSERT。
 """
 
 

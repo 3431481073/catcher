@@ -60,13 +60,18 @@ def update_record(record_id, **fields):
 
 
 def append_note(record_id, note_id, text, time):
-    """追加一条备注（按 id 幂等：已存在则跳过）。"""
+    """追加一条备注（按 id 幂等：已存在则跳过）。
+
+    返回是否**真的追加了**：命中去重 → False，真追加 → True。
+    上层据此决定要不要发 note_added 事件（重试命中时不能再发，否则外部程序会重复加工）。
+    """
     record = get_record_by_id(record_id)
     notes = json.loads(record["note"]) if record["note"] else []
     if any(n.get("id") == note_id for n in notes):
-        return
+        return False
     notes.append({"id": note_id, "text": text, "time": time})
     update_record(record_id, note=json.dumps(notes, ensure_ascii=False))
+    return True
 
 
 # ---------- tasks ----------

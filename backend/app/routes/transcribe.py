@@ -4,7 +4,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from .. import audio as audio_mod
-from .. import config, models
+from .. import config, events, models
 from ..auth import verify_token
 from ..errors import AppError, ok
 
@@ -46,6 +46,10 @@ async def transcribe(
         type="transcribe",
         status="pending",
     )
+
+    # 语音是本项目最主要的入口，和文本/视频一样发 record_created
+    # （上面 local_id 幂等的提前 return 不发，重试不补发）
+    events.emit(record_id, "record_created")
 
     # 立刻返回完整 RecordDTO
     return ok(models.build_record_dto(record))
