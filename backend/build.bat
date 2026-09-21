@@ -24,13 +24,32 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [3/4] Build onefile exe...
-"%PY%" -m PyInstaller build.spec --noconfirm --clean
+echo [3/4] Build onedir bundle into .build_onedir\ ...
+"%PY%" -m PyInstaller build.spec --noconfirm --clean --distpath ".build_onedir"
 if errorlevel 1 (
     echo [ERROR] PyInstaller failed
     pause
     exit /b 1
 )
+rem onedir 产物是目录（backend.exe + _internal\），不是单文件。部署布局仍是
+rem dist\backend.exe + dist\_internal\，与 onefile 时代一致，所以 config.py 的
+rem BASE_DIR、服务管理器 YAML、bat 助手都不用改。
+rem 数据 data\ tools\ .cache\ 在 dist\ 下、不在构建输出目录内 —— --noconfirm 删输出目录时碰不到 app.db。
+if exist "dist\_internal" rmdir /S /Q "dist\_internal"
+copy /Y ".build_onedir\backend\backend.exe" "dist\backend.exe" >nul
+xcopy /E /I /Y /Q ".build_onedir\backend\_internal" "dist\_internal\" >nul
+if not exist "dist\backend.exe" (
+    echo [ERROR] deploy failed: dist\backend.exe
+    pause
+    exit /b 1
+)
+if not exist "dist\_internal" (
+    echo [ERROR] deploy failed: dist\_internal
+    pause
+    exit /b 1
+)
+rmdir /S /Q ".build_onedir"
+echo   deployed dist\backend.exe + dist\_internal\
 
 echo [4/4] Copy resources...
 if not exist "dist\tools" mkdir "dist\tools"

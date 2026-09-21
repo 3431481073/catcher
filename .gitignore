@@ -8,12 +8,15 @@ __pycache__/
 # ---- 构建产物 ----
 build/
 dist/
+.build_onedir/
+dist_onefile_backup/
 backend/tools/ffmpeg-*/
 backend/tools/ffmpeg.zip
 backend/tools/*.exe
 
 # ---- 运行数据（数据库、音频、日志）----
 backend/data/
+backend/backups/
 backend/*.log
 *.err.log
 *.out.log
