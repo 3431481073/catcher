@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>悬浮剪藏 · v12</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;
+    background:radial-gradient(1400px 900px at 50% -10%,#1b1e33 0%,#0a0b10 55%,#050609 100%);
+    display:flex;align-items:center;justify-content:center;
+    color:#fff;padding:20px 0;overflow-y:auto;
+  }
+
+  .phone{
+    position:relative;width:390px;height:844px;
+    border-radius:46px;border:8px solid #1a1c24;
+    box-shadow:0 0 0 1px #3a3d52,0 40px 90px rgba(0,0,0,.85),0 0 120px rgba(108,140,255,.08);
+    background:#000;overflow:hidden;flex:0 0 auto;
+  }
+  .screen{position:relative;width:100%;height:100%;border-radius:38px;overflow:hidden;background:#000;}
+
+  .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:112px;height:30px;border-radius:16px;background:#000;z-index:100;}
+  .statusbar{
+    position:absolute;top:0;left:0;right:0;height:54px;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 26px 0;font-size:13px;font-weight:600;letter-spacing:.2px;
+    color:#fff;z-index:90;pointer-events:none;text-shadow:0 1px 4px rgba(0,0,0,.5);
+  }
+  .statusbar .right{display:flex;align-items:center;gap:5px;font-size:11px;opacity:.9;}
+
+  .feed{position:absolute;inset:0;overflow-y:auto;scroll-snap-type:y mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .feed::-webkit-scrollbar{display:none;}
+  .clip{position:relative;height:100%;scroll-snap-align:start;overflow:hidden;}
+  .clip-bg{position:absolute;inset:0;background:linear-gradient(165deg,var(--g1) 0%,var(--g2) 70%,#05060a 100%);}
+  .clip-bg span{position:absolute;border-radius:50%;filter:blur(70px);opacity:.55;}
+  .clip-bg span:nth-child(1){width:280px;height:280px;background:var(--a1);top:8%;left:-15%;}
+  .clip-bg span:nth-child(2){width:240px;height:240px;background:var(--a2);bottom:22%;right:-18%;}
+  .clip-bg span:nth-child(3){width:180px;height:180px;background:var(--a1);bottom:8%;left:20%;opacity:.35;}
+  .clip::after{
+    content:'';position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(0,0,0,.45) 0%,rgba(0,0,0,0) 22%,rgba(0,0,0,0) 55%,rgba(0,0,0,.72) 100%);
+    pointer-events:none;
+  }
+  .side{position:absolute;right:12px;bottom:118px;display:flex;flex-direction:column;align-items:center;gap:20px;z-index:5;}
+  .sb{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;}
+  .sb-ico{
+    width:42px;height:42px;border-radius:50%;
+    background:rgba(0,0,0,.28);backdrop-filter:blur(8px);
+    display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;
+    border:1px solid rgba(255,255,255,.08);
+    transition:transform .15s,background .15s;
+  }
+  .sb:active .sb-ico{transform:scale(.88);background:rgba(0,0,0,.5);}
+  .sb-num{font-size:11px;font-weight:600;color:rgba(255,255,255,.88);text-shadow:0 1px 3px rgba(0,0,0,.6);}
+
+  .sb.share-highlight .sb-ico{
+    background:rgba(176,108,255,.35);
+    border-color:rgba(176,108,255,.6);
+    animation:sharePulse 2s ease-in-out infinite;
+  }
+  @keyframes sharePulse{
+    0%,100%{box-shadow:0 0 16px rgba(176,108,255,.5);}
+    50%{box-shadow:0 0 24px rgba(176,108,255,.85);}
+  }
+
+  .clip-info{position:absolute;left:16px;right:76px;bottom:36px;z-index:5;}
+  .clip-user{font-size:15px;font-weight:700;margin-bottom:7px;text-shadow:0 1px 6px rgba(0,0,0,.6);}
+  .clip-desc{font-size:13.5px;line-height:1.45;color:rgba(255,255,255,.94);margin-bottom:8px;text-shadow:0 1px 6px rgba(0,0,0,.6);}
+  .clip-desc em{font-style:normal;color:#8fb3ff;}
+  .clip-music{font-size:12px;color:rgba(255,255,255,.75);display:flex;align-items:center;gap:6px;}
+  .clip-music .bar{width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#6C8CFF,#b06cff);}
+
+  /* ============ 悬浮球 ============ */
+  .orb{
+    position:absolute;right:8px;top:42%;
+    width:52px;height:52px;border-radius:50%;
+    background:rgba(22,24,34,.72);
+    backdrop-filter:blur(20px) saturate(180%);
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid rgba(255,255,255,.13);
+    box-shadow:0 8px 28px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.14);
+    display:flex;align-items:center;justify-content:center;
+    color:rgba(255,255,255,.88);cursor:pointer;z-index:60;touch-action:none;
+    transition:background .3s ease,box-shadow .3s ease,color .3s ease;
+    transform-origin:center center;
+  }
+  .orb svg{width:20px;height:20px;}
+
+  /* 录音中：红色脉冲 + 音频波动 */
+  .orb.state-rec{
+    background:rgba(255,77,109,.95);
+    border-color:rgba(255,255,255,.35);color:#fff;
+    box-shadow:0 8px 34px rgba(255,77,109,.6);
+    animation:recWave 0.6s ease-in-out infinite alternate;
+  }
+  @keyframes recWave{
+    0%{transform:scale(.94);}
+    100%{transform:scale(1.14);}
+  }
+  .orb.state-rec::before{
+    content:'';position:absolute;inset:-4px;border-radius:50%;
+    border:2px solid rgba(255,77,109,.7);
+    animation:pulseRing 1.3s ease-out infinite;
+  }
+  @keyframes pulseRing{
+    0%{transform:scale(.92);opacity:.95;}
+    100%{transform:scale(1.8);opacity:0;}
+  }
+
+  .orb.state-busy{
+    background:rgba(108,140,255,.92);
+    border-color:rgba(255,255,255,.35);color:#fff;
+    box-shadow:0 8px 34px rgba(108,140,255,.55);
+  }
+  .orb.state-busy::before{
+    content:'';position:absolute;inset:-5px;border-radius:50%;
+    border:2px solid transparent;
+    border-top-color:rgba(200,220,255,.95);
+    border-right-color:rgba(200,220,255,.4);
+    animation:spin .9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .orb.state-done-voice{background:rgba(52,199,89,.95);border-color:rgba(255,255,255,.4);color:#fff;box-shadow:0 8px 34px rgba(52,199,89,.6);}
+  .orb.state-done-text{background:rgba(47,212,196,.95);border-color:rgba(255,255,255,.4);color:#fff;box-shadow:0 8px 34px rgba(47,212,196,.6);}
+  .orb.state-done-video{background:rgba(176,108,255,.95);border-color:rgba(255,255,255,.4);color:#fff;box-shadow:0 8px 34px rgba(176,108,255,.6);}
+  .orb.state-done-voice::before,
+  .orb.state-done-text::before,
+  .orb.state-done-video::before{
+    content:'';position:absolute;inset:-4px;border-radius:50%;
+    border:2px solid currentColor;animation:pulseRing 1s ease-out;
+  }
+
+  /* ============ 面板 ============ */
+  .panel{
+    position:absolute;right:72px;top:42%;width:300px;border-radius:22px;
+    background:rgba(18,20,28,.78);
+    backdrop-filter:blur(26px) saturate(190%);
+    -webkit-backdrop-filter:blur(26px) saturate(190%);
+    border:1px solid rgba(255,255,255,.1);
+    box-shadow:0 24px 60px rgba(0,0,0,.65),0 0 0 1px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.08);
+    z-index:58;transform-origin:right center;
+    transform:translateY(-50%) scale(.86) translateX(14px);
+    opacity:0;pointer-events:none;
+    transition:transform .28s cubic-bezier(.2,.9,.3,1.15),opacity .22s ease;
+    overflow:hidden;
+  }
+  .panel.open{transform:translateY(-50%) scale(1) translateX(0);opacity:1;pointer-events:auto;}
+
+  .p-head{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;}
+  .p-dot{width:7px;height:7px;border-radius:50%;background:#34C759;box-shadow:0 0 10px rgba(52,199,89,.9);animation:blinkDot 2.4s ease-in-out infinite;}
+  @keyframes blinkDot{0%,100%{opacity:1;}50%{opacity:.35;}}
+  .p-title{font-size:13.5px;font-weight:700;letter-spacing:.3px;}
+  .p-meta{margin-left:auto;font-size:10.5px;color:rgba(255,255,255,.42);font-weight:500;}
+
+  .p-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 12px;}
+  .p-act{
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    height:48px;border-radius:14px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.055);
+    color:rgba(255,255,255,.92);
+    font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;
+    transition:background .18s ease,transform .12s ease,border-color .18s;
+  }
+  .p-act:hover{background:rgba(108,140,255,.18);border-color:rgba(108,140,255,.35);}
+  .p-act:active{transform:scale(.95);background:rgba(108,140,255,.28);}
+  .p-act .pa-ico{font-size:17px;line-height:1;}
+
+  .p-logs{max-height:168px;overflow-y:auto;padding:0 10px 8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .p-logs::-webkit-scrollbar{display:none;}
+
+  .log-item{
+    display:flex;align-items:center;gap:7px;
+    height:36px;padding:0 10px;border-radius:11px;
+    background:rgba(255,255,255,.035);
+    font-size:12.5px;color:rgba(255,255,255,.78);
+    cursor:pointer;transition:background .15s;margin-bottom:4px;
+    animation:logIn .32s cubic-bezier(.2,.9,.3,1.15);
+  }
+  @keyframes logIn{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
+  .log-item:hover{background:rgba(108,140,255,.12);}
+  .log-item:active{background:rgba(108,140,255,.22);}
+
+  .log-icon{font-size:13px;flex:0 0 auto;width:18px;text-align:center;opacity:.85;}
+  .log-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .log-time{font-size:10px;color:rgba(255,255,255,.3);flex:0 0 auto;font-variant-numeric:tabular-nums;}
+
+  .log-note-btn{
+    flex:0 0 auto;width:22px;height:22px;border-radius:50%;
+    border:none;background:rgba(255,77,109,.22);color:#ff7a93;
+    font-size:10.5px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    transition:background .15s,transform .12s;padding:0;
+    animation:notePulse 1.8s ease-in-out infinite;
+  }
+  @keyframes notePulse{0%,100%{box-shadow:0 0 0 0 rgba(255,77,109,.5);}50%{box-shadow:0 0 0 5px rgba(255,77,109,0);}}
+  .log-note-btn:hover{background:rgba(255,77,109,.4);}
+  .log-note-btn:active{transform:scale(.88);}
+
+  /* ============ 底部面板 ============ */
+  .bottom-sheet{
+    position:absolute;left:0;right:0;bottom:0;
+    border-radius:24px 24px 0 0;
+    background:rgba(24,26,36,.96);
+    backdrop-filter:blur(34px) saturate(190%);
+    -webkit-backdrop-filter:blur(34px) saturate(190%);
+    border-top:1px solid rgba(255,255,255,.1);
+    box-shadow:0 -20px 60px rgba(0,0,0,.7);
+    padding:12px 20px 24px;
+    transform:translateY(105%);
+    transition:transform .34s cubic-bezier(.2,.9,.3,1.05);
+    z-index:95;
+  }
+  .bottom-sheet.open{transform:translateY(0);}
+
+  .bs-handle{width:36px;height:4px;border-radius:2px;background:rgba(255,255,255,.18);margin:0 auto 16px;}
+
+  .bs-title{
+    font-size:14px;font-weight:700;color:rgba(255,255,255,.85);
+    margin-bottom:6px;letter-spacing:.3px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .bs-title .bs-type-tag{
+    font-size:11px;font-weight:600;
+    padding:2px 8px;border-radius:6px;
+    background:rgba(176,108,255,.18);color:#c99bff;
+  }
+
+  .bs-preview{
+    font-size:12.5px;color:rgba(255,255,255,.5);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    margin-bottom:14px;
+    padding-bottom:12px;
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .bs-preview .link{color:rgba(108,140,255,.7);text-decoration:underline;text-underline-offset:2px;cursor:pointer;}
+
+  .bs-title-row{margin-bottom:10px;}
+  .bs-title-input{
+    width:100%;height:42px;
+    padding:0 16px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.1);
+    background:rgba(255,255,255,.05);
+    color:rgba(255,255,255,.9);
+    font-family:inherit;font-size:13.5px;
+    outline:none;
+    transition:border-color .2s,background .2s;
+  }
+  .bs-title-input:focus{border-color:rgba(108,140,255,.5);background:rgba(108,140,255,.06);}
+  .bs-title-input::placeholder{color:rgba(255,255,255,.22);}
+
+  .bs-input-wrap{position:relative;margin-bottom:14px;}
+  .bs-input{
+    width:100%;
+    min-height:52px;max-height:120px;
+    padding:14px 16px;
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,.1);
+    background:rgba(255,255,255,.05);
+    color:rgba(255,255,255,.9);
+    font-family:inherit;font-size:14px;
+    line-height:1.5;
+    resize:none;outline:none;
+    transition:border-color .2s,background .2s;
+  }
+  .bs-input:focus{border-color:rgba(108,140,255,.5);background:rgba(108,140,255,.06);}
+  .bs-input::placeholder{color:rgba(255,255,255,.25);}
+
+  .bs-footer{display:flex;gap:8px;}
+  .bs-btn{
+    height:48px;border-radius:14px;
+    border:none;font-family:inherit;font-size:14px;font-weight:700;
+    cursor:pointer;transition:all .15s;
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    white-space:nowrap;
+  }
+  .bs-btn.cancel{
+    flex:1;
+    background:rgba(255,255,255,.07);
+    color:rgba(255,255,255,.55);
+    border:1px solid rgba(255,255,255,.08);
+  }
+  .bs-btn.cancel:hover{background:rgba(255,255,255,.12);}
+
+  .bs-btn.voice{
+    flex:1.2;
+    background:rgba(255,77,109,.14);
+    color:#ff9db2;
+    border:1px solid rgba(255,77,109,.3);
+    font-size:13px;
+  }
+  .bs-btn.voice:hover{background:rgba(255,77,109,.22);}
+  .bs-btn.voice.recording{
+    background:rgba(255,77,109,.5);
+    border-color:rgba(255,77,109,.9);
+    color:#fff;
+    box-shadow:0 0 22px rgba(255,77,109,.45);
+  }
+  .bs-btn.voice .voice-icon{font-size:15px;}
+  .bs-btn.voice.recording .voice-icon{animation:voicePulse .8s ease-in-out infinite;}
+  @keyframes voicePulse{0%,100%{transform:scale(1);}50%{transform:scale(1.25);}}
+
+  .bs-btn.confirm{
+    flex:1.2;
+    background:linear-gradient(135deg,#6C8CFF,#8a6cff);
+    color:#fff;
+    box-shadow:0 6px 20px rgba(108,140,255,.35);
+  }
+  .bs-btn.confirm:hover{box-shadow:0 8px 28px rgba(108,140,255,.5);}
+  .bs-btn.confirm:active{transform:scale(.97);}
+
+  /* ============ 详情面板：文字可选中复制 ============ */
+  .sheet{
+    position:absolute;left:12px;right:12px;bottom:12px;
+    border-radius:24px;
+    background:rgba(20,22,32,.94);
+    backdrop-filter:blur(30px) saturate(190%);
+    -webkit-backdrop-filter:blur(30px) saturate(190%);
+    border:1px solid rgba(255,255,255,.1);
+    box-shadow:0 20px 60px rgba(0,0,0,.7),0 0 0 1px rgba(0,0,0,.4);
+    padding:16px 18px 18px;
+    transform:translateY(130%);
+    transition:transform .34s cubic-bezier(.2,.9,.3,1.1);
+    z-index:90;max-height:60%;
+    display:flex;flex-direction:column;
+  }
+  .sheet.open{transform:translateY(0);}
+  .sheet-handle{width:36px;height:4px;border-radius:2px;background:rgba(255,255,255,.18);margin:0 auto 14px;flex:0 0 auto;}
+  .sheet-head{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex:0 0 auto;}
+  .sheet-type{font-size:12px;font-weight:700;padding:3px 9px;border-radius:7px;background:rgba(108,140,255,.18);color:#8fb3ff;letter-spacing:.3px;}
+  .sheet-type.video{background:rgba(176,108,255,.18);color:#c99bff;}
+  .sheet-type.text{background:rgba(47,212,196,.16);color:#5ee0d4;}
+  .sheet-time{font-size:11px;color:rgba(255,255,255,.35);margin-left:2px;}
+  .sheet-close{margin-left:auto;width:28px;height:28px;border-radius:50%;border:none;background:rgba(255,255,255,.08);color:rgba(255,255,255,.65);font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;}
+  .sheet-close:hover{background:rgba(255,255,255,.16);}
+
+  /* 详情内容：允许选中复制 */
+  .sheet-body{
+    font-size:14px;line-height:1.65;color:rgba(255,255,255,.86);
+    overflow-y:auto;flex:1;min-height:0;
+    scrollbar-width:none;white-space:pre-wrap;word-break:break-word;
+    user-select:text;-webkit-user-select:text;cursor:text;
+    -webkit-touch-callout:default;
+  }
+  .sheet-body::-webkit-scrollbar{display:none;}
+
+  .sheet-note{
+    margin-top:12px;padding:10px 12px;border-radius:12px;
+    background:rgba(255,77,109,.1);
+    border-left:2px solid rgba(255,77,109,.5);
+    font-size:13px;color:#ff9db2;flex:0 0 auto;
+    user-select:text;-webkit-user-select:text;cursor:text;
+    -webkit-touch-callout:default;
+  }
+
+  .overlay{
+    position:absolute;inset:0;
+    background:rgba(0,0,0,.35);
+    opacity:0;pointer-events:none;
+    transition:opacity .28s ease;
+    z-index:94;
+  }
+  .overlay.show{opacity:1;pointer-events:auto;}
+</style>
+</head>
+<body>
+
+<div class="phone" id="phone">
+  <div class="screen" id="screen">
+
+    <div class="island"></div>
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="right"><span>5G</span><span>▮▮▮</span><span>100%</span></span>
+    </div>
+
+    <div class="feed">
+      <section class="clip" style="--g1:#3a1f6e;--g2:#0d0a1a;--a1:#6C8CFF;--a2:#b06cff;">
+        <div class="clip-bg"><span></span><span></span><span></span></div>
+        <div class="side">
+          <div class="sb"><div class="sb-ico">♥</div><div class="sb-num">12.3w</div></div>
+          <div class="sb"><div class="sb-ico">💬</div><div class="sb-num">3842</div></div>
+          <div class="sb share-highlight" id="shareBtn1">
+            <div class="sb-ico">↗</div>
+            <div class="sb-num">分享</div>
+          </div>
+        </div>
+        <div class="clip-info">
+          <div class="clip-user">@知识小馆</div>
+          <div class="clip-desc">三分钟讲透：为什么你总是拖延？<em>#知识 #成长</em></div>
+          <div class="clip-music"><span class="bar"></span>原声 - 知识小馆</div>
+        </div>
+      </section>
+
+      <section class="clip" style="--g1:#5a1f3a;--g2:#14060c;--a1:#ff6b9d;--a2:#ff9f45;">
+        <div class="clip-bg"><span></span><span></span><span></span></div>
+        <div class="side">
+          <div class="sb"><div class="sb-ico">♥</div><div class="sb-num">46.8w</div></div>
+          <div class="sb"><div class="sb-ico">💬</div><div class="sb-num">1.2w</div></div>
+          <div class="sb" id="shareBtn2">
+            <div class="sb-ico">↗</div>
+            <div class="sb-num">分享</div>
+          </div>
+        </div>
+        <div class="clip-info">
+          <div class="clip-user">@网感研究所</div>
+          <div class="clip-desc">这个转场最近老刷到，模板给你们扒出来了 <em>#网感 #剪辑模板</em></div>
+          <div class="clip-music"><span class="bar"></span>热门 BGM - 潮流前线</div>
+        </div>
+      </section>
+    </div>
+
+    <div class="panel" id="panel">
+      <div class="p-head">
+        <span class="p-dot"></span>
+        <span class="p-title">剪藏</span>
+        <span class="p-meta" id="pMeta">在线 · 队列 0</span>
+      </div>
+      <div class="p-actions">
+        <button class="p-act" id="btnVoice"><span class="pa-ico">🎙</span><span>说话</span></button>
+        <button class="p-act" id="btnText"><span class="pa-ico">📝</span><span>提交文本</span></button>
+      </div>
+      <div class="p-logs" id="logList"></div>
+    </div>
+
+    <div class="orb" id="orb">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+    </div>
+
+    <div class="overlay" id="overlay"></div>
+
+    <div class="bottom-sheet" id="bottomSheet">
+      <div class="bs-handle"></div>
+      <div id="bsContent"></div>
+      <div class="bs-footer" id="bsFooter">
+        <button class="bs-btn cancel" id="bsCancel">取消</button>
+        <button class="bs-btn voice" id="bsVoice">
+          <span class="voice-icon">🎙</span>
+          <span id="bsVoiceLabel">点击语音识别</span>
+        </button>
+        <button class="bs-btn confirm" id="bsConfirm">确认发送</button>
+      </div>
+    </div>
+
+    <div class="sheet" id="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <span class="sheet-type" id="sheetType">语音</span>
+        <span class="sheet-time" id="sheetTime">14:32</span>
+        <button class="sheet-close" id="sheetClose">×</button>
+      </div>
+      <div class="sheet-body" id="sheetBody"></div>
+      <div class="sheet-note" id="sheetNote" style="display:none;"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  const orb     = document.getElementById('orb');
+  const panel   = document.getElementById('panel');
+  const logList = document.getElementById('logList');
+  const sheet   = document.getElementById('sheet');
+  const sheetType = document.getElementById('sheetType');
+  const sheetTime = document.getElementById('sheetTime');
+  const sheetBody = document.getElementById('sheetBody');
+  const sheetNote = document.getElementById('sheetNote');
+  const overlay = document.getElementById('overlay');
+  const bottomSheet = document.getElementById('bottomSheet');
+  const bsContent = document.getElementById('bsContent');
+  const bsCancel = document.getElementById('bsCancel');
+  const bsVoice = document.getElementById('bsVoice');
+  const bsVoiceLabel = document.getElementById('bsVoiceLabel');
+  const bsConfirm = document.getElementById('bsConfirm');
+  const screen  = document.getElementById('screen');
+
+  const ICON_PLUS  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+  const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+
+  /* ================= 悬浮球状态 ================= */
+  let orbState = 'idle';
+
+  function setOrb(state, icon){
+    orbState = state;
+    orb.className = 'orb';
+    if (state !== 'idle') orb.classList.add('state-' + state);
+    if (icon){
+      orb.innerHTML = icon;
+    } else if (state === 'idle'){
+      orb.innerHTML = ICON_PLUS;
+    }
+  }
+
+  /* ================= 面板 ================= */
+  function openPanel(){ panel.classList.add('open'); }
+  function closePanel(){ panel.classList.remove('open'); }
+  function togglePanel(){ panel.classList.toggle('open'); }
+
+  /* ================= 时间 ================= */
+  function nowTime(){
+    const d = new Date();
+    return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  }
+
+  /* ================= 日志 ================= */
+  const ICONS = { voice:'🎙', video:'🎬', text:'📝' };
+  const TYPE_LABELS = { voice:'语音', video:'视频', text:'文本' };
+  let logSeq = 0;
+
+  function addLog(type, text, opts){
+    opts = opts || {};
+    const el = document.createElement('div');
+    el.className = 'log-item';
+    el.dataset.id = ++logSeq;
+    el.dataset.type = type;
+    el.dataset.full = opts.full || text;
+    el.dataset.time = nowTime();
+
+    let right = '<span class="log-time">' + el.dataset.time + '</span>';
+    if (opts.needNote){
+      right = '<button class="log-note-btn" title="补一句">🎙</button>';
+    }
+
+    el.innerHTML =
+      '<span class="log-icon">' + ICONS[type] + '</span>' +
+      '<span class="log-text">' + text + '</span>' +
+      right;
+
+    logList.prepend(el);
+    return el;
+  }
+
+  /* ================= 点击日志 ================= */
+  logList.addEventListener('click', function(e){
+    const noteBtn = e.target.closest('.log-note-btn');
+    if (noteBtn){
+      e.stopPropagation();
+      const item = noteBtn.closest('.log-item');
+      closePanel();
+      openBottomSheet('share-note', item);
+      return;
+    }
+    const item = e.target.closest('.log-item');
+    if (item) openSheet(item);
+  });
+
+  /* ================= 详情：内容可选中复制 ================= */
+  function openSheet(item){
+    const type = item.dataset.type;
+    const full = item.dataset.full;
+    const note = item.dataset.note;
+
+    sheetType.textContent = TYPE_LABELS[type] || type;
+    sheetType.className = 'sheet-type ' + type;
+    sheetTime.textContent = item.dataset.time || '';
+    sheetBody.textContent = full;
+
+    if (note){
+      sheetNote.style.display = 'block';
+      sheetNote.textContent = '🎙 ' + note;
+    } else {
+      sheetNote.style.display = 'none';
+    }
+    sheet.classList.add('open');
+  }
+  function closeSheet(){ sheet.classList.remove('open'); }
+  document.getElementById('sheetClose').addEventListener('click', closeSheet);
+
+  /* ================= 底部面板 ================= */
+  let bsMode = null;
+  let bsTargetItem = null;
+  let panelVoiceRecording = false;
+
+  function openBottomSheet(mode, item){
+    bsMode = mode;
+    bsTargetItem = item || null;
+
+    panelVoiceRecording = false;
+    bsVoice.classList.remove('recording');
+    bsVoiceLabel.textContent = '点击语音识别';
+
+    if (mode === 'share-note'){
+      bsContent.innerHTML =
+        '<div class="bs-title">🎬 收到视频 <span class="bs-type-tag">抖音</span></div>' +
+        '<div class="bs-preview">三分钟讲透：为什么你总是拖延？ <span class="link">v.douyin.com/xxxxxx</span></div>' +
+        '<div class="bs-input-wrap">' +
+          '<textarea class="bs-input" id="bsInput" placeholder="说一句或写一句…" rows="2"></textarea>' +
+        '</div>';
+      bsConfirm.textContent = '确认发送';
+
+    } else if (mode === 'text-input'){
+      bsContent.innerHTML =
+        '<div class="bs-title">📝 提交文本</div>' +
+        '<div class="bs-title-row">' +
+          '<input class="bs-title-input" id="bsTitleInput" type="text" placeholder="标题（可选）">' +
+        '</div>' +
+        '<div class="bs-input-wrap">' +
+          '<textarea class="bs-input" id="bsInput" placeholder="在这里粘贴或输入…" rows="4"></textarea>' +
+        '</div>';
+      bsConfirm.textContent = '确认保存';
+    }
+
+    bottomSheet.classList.add('open');
+    overlay.classList.add('show');
+
+    setTimeout(function(){
+      const ti = document.getElementById('bsTitleInput');
+      const inp = document.getElementById('bsInput');
+      if (ti) ti.focus();
+      else if (inp) inp.focus();
+    }, 320);
+  }
+
+  function closeBottomSheet(){
+    bottomSheet.classList.remove('open');
+    overlay.classList.remove('show');
+    bsMode = null;
+    bsTargetItem = null;
+    if (panelVoiceRecording){
+      panelVoiceRecording = false;
+      bsVoice.classList.remove('recording');
+      bsVoiceLabel.textContent = '点击语音识别';
+    }
+  }
+
+  /* ================= 面板内语音识别 ================= */
+  bsVoice.addEventListener('click', function(){
+    if (panelVoiceRecording) finishPanelVoice();
+    else startPanelVoice();
+  });
+
+  function startPanelVoice(){
+    panelVoiceRecording = true;
+    bsVoice.classList.add('recording');
+    bsVoiceLabel.textContent = '点击结束';
+    if (navigator.vibrate) navigator.vibrate(15);
+  }
+
+  function finishPanelVoice(){
+    panelVoiceRecording = false;
+    bsVoice.classList.remove('recording');
+    bsVoiceLabel.textContent = '转写中…';
+
+    setTimeout(function(){
+      const input = document.getElementById('bsInput');
+      if (input){
+        const old = input.value.trim();
+        const add = '这个是知识点，最近老刷到';
+        input.value = old ? (old + ' ' + add) : add;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+      bsVoiceLabel.textContent = '点击语音识别';
+    }, 800);
+  }
+
+  /* ================= 底部面板确认 ================= */
+  bsCancel.addEventListener('click', closeBottomSheet);
+
+  bsConfirm.addEventListener('click', function(){
+    const mode = bsMode;
+    const target = bsTargetItem;
+
+    if (mode === 'share-note'){
+      const input = document.getElementById('bsInput');
+      const note = input ? input.value.trim() : '';
+      closeBottomSheet();
+
+      if (target){
+        /* 从日志的补话按钮进来：更新已有日志 */
+        const txt = target.querySelector('.log-text');
+        const rawText = txt.textContent.replace(/ · [^·]+$/, '');
+        if (note){
+          target.dataset.note = note;
+          txt.textContent = rawText + ' · ' + note;
+        } else {
+          txt.textContent = rawText;
+        }
+        const nb = target.querySelector('.log-note-btn');
+        if (nb) nb.remove();
+        const time = target.querySelector('.log-time');
+        if (time) time.textContent = nowTime();
+      } else {
+        /* 从视频"分享"进来：新建一条视频日志 */
+        const displayText = note
+          ? '抖音 · 三分钟讲透拖延症 · ' + note
+          : '抖音 · 三分钟讲透拖延症';
+        addLog('video', displayText, {
+          full: '抖音链接：https://v.douyin.com/xxxxxx\n\n视频标题：三分钟讲透：为什么你总是拖延？\n\n作者：@知识小馆'
+        });
+      }
+
+      /* 确认后才给球反馈 */
+      orbDone('done-video', ICON_CHECK);
+
+    } else if (mode === 'text-input'){
+      const titleInput = document.getElementById('bsTitleInput');
+      const input = document.getElementById('bsInput');
+      const title = titleInput ? titleInput.value.trim() : '';
+      const text = input ? input.value.trim() : '';
+
+      if (!text) return;
+
+      closeBottomSheet();
+
+      const displayTitle = title || (text.length > 20 ? text.slice(0, 20) + '…' : text);
+
+      addLog('text', displayTitle, {
+        full: (title ? '【' + title + '】\n\n' : '') + text
+      });
+
+      /* 确认后才给球反馈 */
+      orbDone('done-text', ICON_CHECK);
+    }
+  });
+
+  /* ================= 悬浮球完成态 ================= */
+  function orbDone(stateClass, icon){
+    setOrb(stateClass, icon);
+    setTimeout(function(){
+      if (orbState === stateClass) setOrb('idle');
+    }, 1800);
+  }
+
+  /* ================= 遮罩 ================= */
+  overlay.addEventListener('click', function(){
+    closeBottomSheet();
+    closeSheet();
+  });
+
+  /* ================= 接收分享 =================
+     点视频右侧"分享" → 只弹底部框，球不动
+     用户输入完 → 点确认 → 球变紫✓ + 新建视频日志 */
+  function receiveShare(){
+    openBottomSheet('share-note', null);
+  }
+
+  /* ================= 主录音：点击式 ================= */
+  let isRecording = false;
+  let recSeconds = 0;
+  let recTicker = null;
+
+  function beginRecord(){
+    if (isRecording) return;
+    isRecording = true;
+    recSeconds = 0;
+    closePanel();
+    closeSheet();
+    closeBottomSheet();
+    setOrb('rec');
+
+    clearInterval(recTicker);
+    recTicker = setInterval(function(){ recSeconds++; }, 1000);
+
+    if (navigator.vibrate) navigator.vibrate(20);
+  }
+
+  function endRecord(){
+    if (!isRecording) return;
+    isRecording = false;
+    clearInterval(recTicker);
+    const dur = Math.max(recSeconds, 1);
+
+    setOrb('busy');
+    setTimeout(function(){
+      addLog('voice', '语音 ' + dur + 's · 已转写并复制', {
+        full: '今天天气不错我想去散步，顺便买点东西回来，晚上做个饭。对了，记得把明天的会议纪要整理一下发给老王。'
+      });
+      orbDone('done-voice', ICON_CHECK);
+    }, 1400);
+  }
+
+  /* ================= 悬浮球手势 ================= */
+  let pressOnOrb = false;
+  let longTimer = null;
+
+  orb.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+
+    if (orbState === 'busy') return;
+    if (isRecording){ endRecord(); return; }
+
+    if (orbState.indexOf('done-') === 0){
+      setOrb('idle');
+      openPanel();
+      return;
+    }
+
+    pressOnOrb = true;
+    clearTimeout(longTimer);
+    longTimer = setTimeout(function(){
+      longTimer = null;
+      pressOnOrb = false;
+      beginRecord();
+    }, 320);
+  });
+
+  window.addEventListener('pointerup', function(){
+    if (longTimer){ clearTimeout(longTimer); longTimer = null; }
+    if (pressOnOrb){ pressOnOrb = false; togglePanel(); }
+  });
+
+  window.addEventListener('pointercancel', function(){
+    if (longTimer){ clearTimeout(longTimer); longTimer = null; }
+    pressOnOrb = false;
+  });
+
+  /* ================= 面板按钮 ================= */
+  document.getElementById('btnVoice').addEventListener('click', function(){
+    beginRecord();
+  });
+
+  document.getElementById('btnText').addEventListener('click', function(){
+    closePanel();
+    openBottomSheet('text-input', null);
+  });
+
+  /* ================= 点外部收起 ================= */
+  screen.addEventListener('pointerdown', function(e){
+    if (overlay.classList.contains('show')){
+      if (!bottomSheet.contains(e.target) && !sheet.contains(e.target)){
+        closeBottomSheet();
+        closeSheet();
+      }
+      return;
+    }
+    if (sheet.classList.contains('open') && !sheet.contains(e.target)){
+      closeSheet();
+      return;
+    }
+    if (!panel.classList.contains('open')) return;
+    if (panel.contains(e.target) || orb.contains(e.target)) return;
+    closePanel();
+  });
+
+  /* ================= 视频里的分享按钮 ================= */
+  document.getElementById('shareBtn1').addEventListener('click', function(e){
+    e.stopPropagation();
+    closePanel();
+    receiveShare();
+  });
+
+  document.getElementById('shareBtn2').addEventListener('click', function(e){
+    e.stopPropagation();
+    closePanel();
+    receiveShare();
+  });
+
+  document.getElementById('shareBtn2').classList.remove('share-highlight');
+
+})();
+</script>
+</body>
+</html>
