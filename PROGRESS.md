@@ -251,6 +251,27 @@
 - **git**：仓库此前不存在（catcher/backend/android 三处都无 `.git`），建基线 `9adfdda`（含 `.gitignore`，排除 .venv/dist/build/tools/data/.gradle；108 文件 / 0.41MB），改动 `1fe7378`。
 - **验证**：三条在打包后的 exe 上通过 —— ①不设变量→键出现（日志 `已写自启项 ClipBackend -> ...`）；②设 `=1`→键不出现（日志 `CLIP_NO_AUTOSTART=1，跳过写自启项`）；③`--uninstall-autostart` 自行退出 exit=0、键删除、无残留进程。**端到端**：管理器带 YAML 的 env 拉起，注册表保持干净。
 
+### 2026-09-21 · 运维 PyInstaller onefile 改 onedir（解包不再吃 C 盘）
+
+- **触发**：C 盘 `%LOCALAPPDATA%\Temp` 被 `_MEIxxxxx` 解包目录堆满 —— 38 次启动累积 35GB（约 0.92GB/次），用户已清过一次存量。
+- **为什么 onefile 注定会堆**：onefile 每次启动都要把 ~1GB 解到临时目录。正常退出时 bootloader 会清理，但**服务管理器的 stop 走 taskkill 强杀，bootloader 从没机会清理**。实测对照：`svcmgr stop` 之后那个 0.95GB 的 `_MEI00007fb82` **仍然在**。所以"把 TEMP 指到 D 盘"这类方案只是把坑从 C 搬到 D（D 盘会按 0.95GB/次继续堆），不算治因。
+- **决策**：改 onedir。不产生临时目录（任何盘都不长），启动从 5~15s 降到 <1s；附带好处：onefile 那对 bootloader 父子进程消失，`backend.exe` 进程数从 2 变 1，"1 进程 = 1 实例"。
+- **关键约束（决定了产物装在哪）**：`config.py` 的 frozen 态 `BASE_DIR = sys.executable.parent`，`data/`（含 app.db）、`tools/`、`.cache/`（1.5GB medium 模型）**都锚在 exe 所在目录**。若按常规把 onedir 装进 `dist\backend\`：后端会找不到现有 app.db 而**另建空库**，还要迁 1.5GB 模型，服务管理器 YAML 的 command/cwd 也得改。更危险的是 **PyInstaller `--noconfirm` 会先删掉输出目录** —— 若把输出直接指向 `dist\`，会连 app.db 一起删。
+- **做法**：构建到 `.build_onedir\` 暂存，再把 `backend.exe` + `_internal\` 拷进 `dist\`。部署布局仍是 `dist\backend.exe`，于是服务管理器 YAML、`config.py`、bat 助手**全都不用改**；数据始终在 `dist\` 下、**不在构建输出目录内**，`--noconfirm` 永远碰不到 app.db。`build.bat` 第 3 步改为"打包到暂存 + 部署拷贝 + 校验"。
+- **代价**：发布物从单 exe 变成文件夹（`backend.exe` + `_internal\` 683 文件 970MB）；`dist\` 里现在混着 `_internal\`（产物）与 `data\ tools\ .cache\`（数据），靠"产物/数据分离"这条规则维持安全。
+- **验证**：两轮 `svcmgr stop/start`（每次 stop 都是强杀，正是当初堆 35GB 的路径）→ `_MEI` 计数恒 0、C 盘剩余空间四次测量一动不动（32.83GB）；`--status` 从 1~3s 降到 404ms；`GET /api/v1/records` 仍返回既有记录（证明打开的是原库、没另建空库）。
+
+### 2026-09-21 · events 事件表：给未来外部处理程序的信号接口
+
+- **背景**：后续要有一个独立的加工程序，需要感知"有新记录进来"和"有新备注追加"。本轮只留最小接口：**不加 API、不加 processed 标记、不改 records 表、不改前端**。
+- **做法**：新增 `events` 表（`id` 自增 / `record_id` / `event_type` / `created_at`）。外部程序**直接读库**、自己维护 id 游标。写入点三处：`POST /records`、`POST /transcribe` 真实创建时发 `record_created`；`PATCH /records/{id}` 追加备注时发 `note_added`。语音也发（用户拍板）——语音是本项目主入口，漏了它外部程序就只能看到文本和视频。
+- **`emit` 用独立连接 + 独立事务**：`db.connect()` 是"退出即提交"的 contextmanager，若把 events 的 INSERT 塞进主业务的同一个连接里，**events 插入失败会连带把 records 的回滚掉** —— 那就违反了"插不进就算了"的前提。所以 emit 自己开一个连接、try/except 全包、失败只 `logger.warning`。
+- **`append_note` 改为返回 bool**：PATCH 按 note id 幂等，手机端断网重试会重发同一个 `append_note`。命中去重时不发事件（只在实际追加时发），否则外部程序会对同一条备注重复加工。两个 `local_id` 幂等的提前 return 同样天然不补发。
+- **不建 `events(id)` 索引**：`id INTEGER PRIMARY KEY AUTOINCREMENT` 就是 rowid，SQLite 已为它维护 B-tree，外部程序 `WHERE id > ?` 走的正是这棵树；再建一个同列索引只是重复占盘 + 拖慢 INSERT。顺带确认 `AUTOINCREMENT` 保证 id 不复用，对游标语义是必要的（实测回收后新事件 id 是 3 而不是 1）。
+- **`event_type` 是自由 TEXT、不是枚举**：将来加类型直接传新字符串，不改表结构、不迁移。事件**只记"发生了什么"、不记内容**，正文去 records 表查（events 只增不删且一直很小，不存在两处不一致）。
+- **已接受的代价**：进程若在主业务提交后、事件插入前退出，该事件永久缺失 —— 按 id 游标的外部程序不会知道那条记录（是**漏**不是延迟）。外部程序可定期拿 records 表兜底对账覆盖。
+- **验证**：pytest 28 passed（新增 6 条）；live 库上 `POST /records` → events 多一条 `record_created`（`record_id` 与返回的完全对应），`PATCH` 新备注 → 多一条 `note_added`，**同 note id 重试 → 不补发**。收尾清残留并留台账：清理前 `records=311 events=2 tasks=196` → 最终 `310/0/196`。
+
 ---
 
 ## 决策日志
@@ -613,6 +634,13 @@ _（暂无，遇到后再填。这里专门放"改了好几次才定下来"的�
 - **解法**：等子进程真正跑完再判定 —— 用**健康 200 / 退出码**当同步点，别按秒数猜。
 - **防止再犯**：①本文件 2026-09-19「PyInstaller onefile + 无窗口 + 原生库」那条**已经写过这个问题**（"别 2 秒就 taskkill（会撞上还没解压完）"），我没先读就下结论 —— 改东西前先搜本文件有没有同类先例。②注册表"键不存在"这类**终态观测无法区分"抑制了写入"与"压根没走到写那段代码"**，必须配一条分支日志才能定论。
 
+### 2026-09-21 · onefile 解包目录把 C 盘堆满 35GB
+
+- **现象**：`C:\Users\asus\AppData\Local\Temp` 里累积 38 个 `_MEIxxxxx` 目录、共 35GB。用户清了一次存量，但清了会再长。
+- **根因**：PyInstaller onefile 每次启动把 ~1GB 解包到 `%TEMP%\_MEIxxxxx`。**正常退出时 bootloader 会清理**，但服务管理器 `stop` 走 taskkill 强杀 → 进程没机会清理 → 每次启停必留 ~0.95GB。实测对照：`svcmgr stop` 之后那个 0.95GB 目录**仍在**。
+- **解法**：改 onedir（见时间线同日条目）—— 不产生临时目录，问题从机制上消失；原本设想的"兜底清理旧 `_MEI`"因此**不再需要**（已无 `_MEI` 可清）。
+- **防止再犯**：①只要进程**可能被强杀**，就不要依赖"退出时清理"这类钩子来保证不留垃圾 —— 产物布局必须选**结构上不产生垃圾**的那种。②判断某方案是否"真治因"时，先测**正常路径会不会留残留**；本例若只看"启动是正常的"就会得出"onefile 没问题"的错误结论。③定量比定性快：35GB ÷ 38 次 ≈ 0.92GB/次，这个数直接指向"每次启动都没清理"，比猜原因快得多。
+
 ---
 
 ## 学到的东西
@@ -637,3 +665,22 @@ _（暂无，遇到后再填。这里专门放"改了好几次才定下来"的�
 - 数据/工具/模型目录用 `sys.executable.parent` 定位是打包态唯一可靠锚点（`__file__` 会指向 `_MEIPASS` 临时目录）。
 - **更正 2026-09-19 条**：上面写"一次性命令要 ~1-3 秒"是低估。本包 onefile 653MB（含 CUDA DLL），实测**解包到子进程开始干活要 5~15 秒**。用"健康 200 / 退出码"当同步点，比按秒数猜稳。
 - **观测要能区分「没发生」和「没走到」**：注册表键、端口占用这类**终态观测，对"提前 return"和"正确抑制"长得一模一样**。判定一个开关是否生效，必须同时拿到一条能标明分支的日志，否则实验设计就是无效的（2026-09-21 被这个坑过一次）。
+
+### 2026-09-21 · 打包产物目录与数据目录必须分开
+
+- **PyInstaller `--noconfirm` 会先删掉整个输出目录**，所以**数据绝不能住在构建输出目录里**。本项目的 `data\ tools\ .cache\` 一直在 `dist\` 下，而 onefile 时代的输出只有 `dist\backend.exe` 一个文件（不删目录）—— 一旦改成 onedir、输出目录正好落在 `dist\`，**app.db 就会被无声删掉**。改打包方式前先问一句："这次的输出目录会不会盖到数据？"
+- 打包态定位数据目录的唯一锚点是 `sys.executable.parent`（`__file__` 指向 `_MEIPASS` 临时目录）。**这个锚点会随产物布局漂移**：onefile 时 exe 在 `dist\`，onedir 常规布局会把 exe 放进 `dist\backend\`，锚点跟着变。所以"改打包方式"从来不只是构建脚本的事，它会连锁影响数据路径。
+- 结论：**产物目录（可被构建清空）与数据目录（不可再生）要分开**，且数据目录的位置**不依赖产物布局**。本项目实际做法：产物装进 `dist\`，但只覆盖 `backend.exe` + `_internal\`，数据三件套不动。
+
+### 2026-09-21 · 旁路机制（events）的三条硬约束
+
+- **旁路写入必须独立连接/事务**：`db.connect()` 是"退出即提交"，旁路的 INSERT 若挂在主业务连接上，旁路失败会**连带回滚主业务**，与"插不进就算了"直接冲突。
+- **幂等重投不能补发信号**：上游按 id 幂等重试（`local_id`、`note.id`）时，消费方如果收到重复信号就会**重复加工**。发信号前必须知道"这次是不是真的改了东西"——本项目让 `append_note` 返回 bool 来回答这个问题。
+- **信号表只记"发生了什么"，不记内容**：内容存两份必然有一天不一致；消费方拿主键回主表查，表就能一直保持很小、只增不删。
+- **`event_type` 用自由 TEXT 而非枚举**：加新类型不用改表结构、不用迁移 —— 对这种"只增不删的小表"，约束越少越省事。
+
+### 2026-09-21 · PowerShell 传多行文本给原生 exe 的两个转义坑
+
+- 用 here-string（`@'...'@`）给 `git commit -m` 传多行消息时，**消息里的 ASCII 双引号 `"` 会被 PowerShell 5.1 的 argv 拼装拆坏**：git 收到的参数在引号处被切断，把消息后半段当成 pathspec（`error: pathspec '...' did not match any file(s)`），提交直接失败 —— 而且失败是静默的，后续 `git add` 会把本该独立的文件裹进下一个提交（本次就让 PROGRESS.md 混进了 build 提交，靠 `reset --soft` 重做）。**解法：消息里改用「」，或写成文件走 `git commit -F 文件`。**
+- `git rev-parse HEAD^{tree}` 里的 `^` 被 PowerShell 当转义符处理，实际执行成 `git rev-parse HEAD` —— 比的是 commit 而非 tree，会给出**看似合理、实则完全不同**的结果（本次据此报了一次假的"内容不一致"）。**解法：用 `git log --format=%T -1` 取 tree 哈希，绕开 `^` 和花括号。**
+- **通用**：用 shell 拼多行/带特殊字符的参数传给原生程序，等于同时跟两层转义规则打交道。宁可走文件（`-F`）或换掉特殊字符，也不要赌"看起来是对的"。
