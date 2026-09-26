@@ -32,6 +32,11 @@ WHISPER_MODEL = os.environ.get("CLIP_WHISPER_MODEL", "medium")
 WHISPER_DEVICE = os.environ.get("CLIP_WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE_TYPE = os.environ.get("CLIP_WHISPER_COMPUTE_TYPE", "float16")
 
+# 语音功能总开关，默认停用（不预加载模型、worker 不领转写任务、/transcribe 直接拒绝）。
+# 历史 voice 记录、模型文件、录音/上传代码全部保留，恢复只需给服务管理器 YAML 加
+# env CLIP_VOICE_ENABLED: "1"，不必重新打包。
+VOICE_ENABLED = os.environ.get("CLIP_VOICE_ENABLED", "0") != "0"
+
 # FFmpeg 可执行文件路径（项目内静态版）
 FFMPEG_PATH = os.environ.get("CLIP_FFMPEG_PATH", str(TOOLS_DIR / "ffmpeg.exe"))
 

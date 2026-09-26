@@ -14,7 +14,6 @@ import com.example.clip.util.Permissions
 @Composable
 fun AppRoot(
     viewModel: MainViewModel,
-    onRequestMicPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onEnterMain: () -> Unit
 ) {
@@ -32,7 +31,6 @@ fun AppRoot(
         )
         else -> {
             LaunchedEffect(Unit) { onEnterMain() }
-            LaunchedEffect(Unit) { onRequestMicPermission() }
             MainScreen(viewModel)
         }
     }

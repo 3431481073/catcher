@@ -53,8 +53,6 @@ import com.example.clip.data.catalog.CatalogStore
 import com.example.clip.domain.model.RecordType
 import com.example.clip.domain.model.SyncStatus
 import com.example.clip.domain.model.TaskStatus
-import com.example.clip.recorder.RecordingController
-import com.example.clip.recorder.VoiceDestination
 import com.example.clip.service.OverlayActions
 import com.example.clip.ui.formatTime
 import com.example.clip.util.ClipboardCache
@@ -125,25 +123,12 @@ private fun TextInputCard(app: ClipApp) {
     var title by remember { mutableStateOf(TextFieldValue("")) }
     var body by remember { mutableStateOf(TextFieldValue("")) }
     var focusedOnTitle by remember { mutableStateOf(false) }
-    var failed by remember { mutableStateOf(false) }
     var tags by remember { mutableStateOf<List<String>>(emptyList()) }
     val textTags by CatalogStore.textTags.collectAsState()
-    val isRecording by RecordingController.isRecording.collectAsState()
-
-    VoiceEffect(
-        onFilled = { text ->
-            if (focusedOnTitle) title = appendField(title, text) else body = appendField(body, text)
-        },
-        onFailed = { failed = true }
-    )
 
     Column(Modifier.fillMaxWidth()) {
         Text("提交文本", style = MaterialTheme.typography.titleMedium, color = Color.White)
         Spacer(Modifier.height(10.dp))
-        if (failed) {
-            Text("转写失败，请重试", style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B))
-            Spacer(Modifier.height(8.dp))
-        }
         OutlinedTextField(
             value = title, onValueChange = { title = it },
             modifier = Modifier.fillMaxWidth().onFocusChanged { focusedOnTitle = it.isFocused },
@@ -195,13 +180,6 @@ private fun TextInputCard(app: ClipApp) {
             ) { Text("取消") }
             Button(
                 onClick = {
-                    if (isRecording) RecordingController.stop(context)
-                    else RecordingController.start(context, VoiceDestination.BODY)
-                },
-                modifier = Modifier.weight(1f)
-            ) { Text(if (isRecording) "停止" else "语音") }
-            Button(
-                onClick = {
                     OverlayActions.submitText(app, title.text, body.text, tags)
                     OverlayState.onSubmitStarted()
                     OverlayState.cardMode.value = null
@@ -230,23 +208,12 @@ private fun VideoInputCard(app: ClipApp) {
     var platformExpanded by remember { mutableStateOf(false) }
     var addingPlatform by remember { mutableStateOf(false) }
     var newPlatform by remember { mutableStateOf("") }
-    var failed by remember { mutableStateOf(false) }
-    val isRecording by RecordingController.isRecording.collectAsState()
 
     LaunchedEffect(Unit) { FileLogger.i("OverlayCard", "VideoInputCard 组合完成") }
-
-    VoiceEffect(
-        onFilled = { text -> note = appendField(note, text) },
-        onFailed = { failed = true }
-    )
 
     Column(Modifier.fillMaxWidth()) {
         Text("视频", style = MaterialTheme.typography.titleMedium, color = Color.White)
         Spacer(Modifier.height(10.dp))
-        if (failed) {
-            Text("转写失败，请重试", style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B))
-            Spacer(Modifier.height(8.dp))
-        }
         OutlinedTextField(
             value = title, onValueChange = { title = it },
             modifier = Modifier.fillMaxWidth(),
@@ -383,13 +350,6 @@ private fun VideoInputCard(app: ClipApp) {
             ) { Text("取消") }
             Button(
                 onClick = {
-                    if (isRecording) RecordingController.stop(context)
-                    else RecordingController.start(context, VoiceDestination.NOTE)
-                },
-                modifier = Modifier.weight(1f)
-            ) { Text(if (isRecording) "停止" else "语音") }
-            Button(
-                onClick = {
                     OverlayActions.submitVideo(app, title.text, url.text, platform, note.text, tags)
                     OverlayState.onSubmitStarted()
                     OverlayState.cardMode.value = null
@@ -485,13 +445,6 @@ private fun TypeTag(type: RecordType) {
     }
 }
 
-/** 追加转写结果：空格分隔不换行，光标移到末尾。 */
-private fun appendField(field: TextFieldValue, text: String): TextFieldValue {
-    val current = field.text
-    val appended = if (current.isBlank()) text else "$current $text"
-    return field.copy(text = appended, selection = TextRange(appended.length))
-}
-
 /** 把剪贴板文字插入到当前光标处（替换选区），光标移到插入内容末尾。 */
 private fun pasteInto(field: TextFieldValue, text: String): TextFieldValue {
     val cur = field.text
@@ -559,30 +512,4 @@ private fun readClipboard(context: Context): String? {
         null
     }
     return if (!direct.isNullOrEmpty()) direct else ClipboardCache.cachedText()
-}
-
-/** 观察最近一条语音记录的终态：完成填输入框、失败回调 onFailed。 */
-@Composable
-private fun VoiceEffect(onFilled: (String) -> Unit, onFailed: () -> Unit) {
-    val app = LocalContext.current.applicationContext as ClipApp
-    val lastVoiceId by RecordingController.lastVoiceId.collectAsState()
-    LaunchedEffect(lastVoiceId) {
-        val id = lastVoiceId ?: return@LaunchedEffect
-        if (RecordingController.recordingDestination.value == VoiceDestination.CLIPBOARD) return@LaunchedEffect
-        app.repository.observeRecord(id).collect { record ->
-            val content = record?.content
-            when {
-                !content.isNullOrBlank() -> {
-                    onFilled(content)
-                    RecordingController.lastVoiceId.value = null
-                    RecordingController.recordingDestination.value = VoiceDestination.CLIPBOARD
-                }
-                record?.taskStatus == TaskStatus.FAILED || record?.syncStatus == SyncStatus.FAILED -> {
-                    onFailed()
-                    RecordingController.lastVoiceId.value = null
-                    RecordingController.recordingDestination.value = VoiceDestination.CLIPBOARD
-                }
-            }
-        }
-    }
 }

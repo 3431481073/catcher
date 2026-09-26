@@ -101,16 +101,26 @@ def get_latest_task(record_id):
     return dict(row) if row else None
 
 
-def claim_next_pending_task():
-    """原子地把最早一条 pending 任务置为 processing，返回该任务；无则 None。"""
+def claim_next_pending_task(exclude_types: tuple = ()):
+    """原子地把最早一条 pending 任务置为 processing，返回该任务；无则 None。
+
+    exclude_types 是黑名单（当前用于停用语音时排除 'transcribe'）。用黑名单而非白名单，
+    是为了将来新增 task 类型时不会被静默饿死。
+    """
     now = _now()
+    where = "status='pending'"
+    # 占位符按 SQL 中出现的顺序：先 SET 的 updated_at，再子查询的 NOT IN
+    params: list = [now]
+    if exclude_types:
+        where += f" AND type NOT IN ({','.join('?' * len(exclude_types))})"
+        params += list(exclude_types)
     with connect() as conn:
         row = conn.execute(
             "UPDATE tasks SET status='processing', updated_at=?"
-            " WHERE id = (SELECT id FROM tasks WHERE status='pending'"
+            f" WHERE id = (SELECT id FROM tasks WHERE {where}"
             " ORDER BY created_at ASC LIMIT 1)"
             " RETURNING id, record_id, type, created_at",
-            (now,),
+            params,
         ).fetchone()
     return dict(row) if row else None
 

@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.clip"
         minSdk = 29
         targetSdk = 34
-        versionCode = 36
-        versionName = "0.8.5"
+        versionCode = 37
+        versionName = "0.8.6"
     }
 
     buildTypes {

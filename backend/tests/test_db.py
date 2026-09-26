@@ -24,6 +24,23 @@ def test_claim_and_reset(db_env):
     assert models.get_task("task_1")["status"] == "pending"
 
 
+def test_claim_excludes_types(db_env):
+    """停用语音时 worker 传 exclude_types=('transcribe',)：跳过 transcribe，仍能领别的类型。"""
+    models.create_record("rec_1", "loc_1", "voice", "processing", raw_audio="/tmp/a.webm")
+    models.create_record("rec_2", "loc_2", "video", "done")
+    models.create_task("task_t", "rec_1", "transcribe")          # 更早，但应被排除
+    models.create_task("task_v", "rec_2", "video_analyze")
+
+    t = models.claim_next_pending_task(exclude_types=("transcribe",))
+    assert t["id"] == "task_v"
+    # 被排除的那条必须原样留着（不是被标 skipped、也不是被吞掉）
+    assert models.get_task("task_t")["status"] == "pending"
+
+    # 没传 exclude_types 时行为不变，仍按 created_at 取最早
+    models.set_task_status("task_v", "done")
+    assert models.claim_next_pending_task()["id"] == "task_t"
+
+
 def test_queue_position(db_env):
     models.create_record("rec_1", "loc_1", "voice", "processing")
     models.create_record("rec_2", "loc_2", "voice", "processing")

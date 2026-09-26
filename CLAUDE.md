@@ -208,6 +208,7 @@ PRAGMA busy_timeout=5000;
 | `UNAUTHORIZED` | 401 | Token 无效 |
 | `INVALID_PAYLOAD` | 400 | 请求格式错 |
 | `NOT_FOUND` | 404 | 资源不存在 |
+| `FEATURE_DISABLED` | 503 | 语音已停用（`CLIP_VOICE_ENABLED=0`） |
 | `SERVER_ERROR` | 500 | 服务端错误 |
 
 ### 接口清单

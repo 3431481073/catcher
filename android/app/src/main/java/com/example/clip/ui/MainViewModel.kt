@@ -18,7 +18,6 @@ import com.example.clip.domain.model.RecordStatus
 import com.example.clip.domain.model.RecordType
 import com.example.clip.domain.model.SyncStatus
 import com.example.clip.domain.repository.RecordRepository
-import com.example.clip.recorder.RecordingController
 import com.example.clip.service.UploadQueue
 import com.example.clip.util.FileLogger
 import com.example.clip.util.Ids
@@ -59,9 +58,6 @@ class MainViewModel(
     val tokenSaving = MutableStateFlow(false)
     val tokenError = MutableStateFlow<String?>(null)
 
-    /** 麦克风权限被拒（用于 UI 提示 + 去设置） */
-    val micPermissionDenied = MutableStateFlow(false)
-
     /** 引导页是否已走完（SharedPreferences 持久化）。 */
     private val onboardingPrefs = application.getSharedPreferences("onboarding", Context.MODE_PRIVATE)
     val onboardingDone = MutableStateFlow(onboardingPrefs.getBoolean("done", false))
@@ -99,11 +95,6 @@ class MainViewModel(
                 tokenSaving.value = false
             }
         }
-    }
-
-    fun onSpeak() {
-        panelVisible.value = false
-        RecordingController.start(getApplication())
     }
 
     /** 悬浮球短按（App 在前台）→ 切面板。 */
@@ -225,10 +216,6 @@ class MainViewModel(
                 UploadQueue.scheduleNow(getApplication(), record.localId)
             }
         }
-    }
-
-    fun onMicPermissionResult(granted: Boolean) {
-        micPermissionDenied.value = !granted
     }
 
     /** Token 失效提示条点击：清 token 回设置页 + 恢复队列门。 */

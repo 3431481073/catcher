@@ -59,6 +59,26 @@ def test_transcribe_missing_local_id(client):
     assert r.json()["error"]["code"] == "INVALID_PAYLOAD"
 
 
+def test_transcribe_disabled(client, db_env, monkeypatch):
+    """CLIP_VOICE_ENABLED=0 → 503 FEATURE_DISABLED，且一行都不落库。"""
+    from app import config, db
+
+    monkeypatch.setattr(config, "VOICE_ENABLED", False)
+
+    r = _post_transcribe(client, "loc_disabled")
+    assert r.status_code == 503
+    assert r.json()["ok"] is False
+    assert r.json()["error"]["code"] == "FEATURE_DISABLED"
+
+    # 状态码只证明「拒绝了」，下面才证明「真的没落库」（含 events 旁路与音频文件）
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
+    audio_files = list(db_env.AUDIO_DIR.iterdir()) if db_env.AUDIO_DIR.exists() else []
+    assert audio_files == []
+
+
 def test_records_list(client):
     _post_transcribe(client, "loc_list")
     r = client.get("/api/v1/records", headers=_auth())

@@ -272,6 +272,25 @@
 - **已接受的代价**：进程若在主业务提交后、事件插入前退出，该事件永久缺失 —— 按 id 游标的外部程序不会知道那条记录（是**漏**不是延迟）。外部程序可定期拿 records 表兜底对账覆盖。
 - **验证**：pytest 28 passed（新增 6 条）；live 库上 `POST /records` → events 多一条 `record_created`（`record_id` 与返回的完全对应），`PATCH` 新备注 → 多一条 `note_added`，**同 note id 重试 → 不补发**。收尾清残留并留台账：清理前 `records=311 events=2 tasks=196` → 最终 `310/0/196`。
 
+### 2026-09-26 · 停用语音功能（versionCode=37）
+
+- **背景**：whisper 转写常驻占 2GB 显存，实际识别质量不如手机自带语音输入。用户决定停用语音入口，**保留全部代码与历史数据**（模型文件、records/tasks/events、录音/上传代码一律不动）。
+- **停用方式（用户拍板）**：加 env 开关 `CLIP_VOICE_ENABLED`，**默认 "0"（停用）**。恢复时给服务管理器 YAML 加 `env: CLIP_VOICE_ENABLED: "1"` 即可，**不必重新打包**。配套决定：**不从 `build.spec` 摘掉 whisper/CUDA 依赖** —— 摘掉能把 `_internal` 从 970MB 压小，但会让这个开关失效，"改环境变量就能恢复"的承诺就没了。
+- **后端四处改动**：①`config.py` 加 `VOICE_ENABLED`；②`main.py` lifespan 分支跳过 `preload()`（**并打一行分支日志**）；③`routes/transcribe.py` 处理器**第一句**就 `raise AppError("FEATURE_DISABLED", ..., 503)`，早于 `local_id` 校验与落盘；④`models.claim_next_pending_task(exclude_types=...)` + `worker._loop` 传 `("transcribe",)`。
+- **选「过滤」而不是「领取后标 skipped」**：标 skipped 会把「按钮已停用」伪装成「视频式跳过」（架构 §六约定只有视频是 skipped），将来恢复语音时证据没了，且会改写历史任务状态。黑名单而非白名单，是为了将来加新 task 类型不被静默饿死。
+- **Android 四处 UI 入口全删**（用户拍板）：主面板「语音」、文本卡片「语音」（填正文）、视频卡片「语音」（填备注）、App 内旧面板「说话」。连带清掉已成死代码的 `VoiceEffect` / `appendField` / `isRecording` / 转写失败红字。主面板 `Row` + `weight(1f)` 自动从三等分变二等分，布局结构未改。
+- **麦克风权限申请一并去掉，且横幅必须一起删**（用户拍板）：`MainActivity.onResume` 每次都按实际权限刷 `micPermissionDenied`，**只删"申请"不删横幅，全新安装会永久挂着「需要麦克风权限才能录音」**。所以连带删 `AppRoot`/`MainActivity`/`MainViewModel`/`MainScreen` 的整条链路。`AndroidManifest` 的 `RECORD_AUDIO` 与 `FOREGROUND_SERVICE_MICROPHONE` **保留**（录音代码在，将来恢复只加回约 15 行接线）。
+- **保留不动**（删了会伤历史展示）：`RecordType.VOICE`、`Format.kt` 的 "语音" 显示名、`TypeTag` VOICE 分支、`recorder/` 与 `service/` 全部录音上传代码。
+- 🔁 **「启动变快」这个预期是错的**：`transcribe.preload()` 走 `asyncio.to_thread`，加载本来就在线程池里跑，**不阻塞 uvicorn 启动**。停用后 `--status` / 首请求延迟都不会明显变化。真实收益是**不占 2GB 显存 + 约 1.5GB 内存**，以及启动后不再有 14s 的 GPU/CPU 抢占窗口。验收口径据此改写（见下）。
+- 🔁 **「nvidia-smi 里没有 python 占显存」这条验收标准在本机不可用**：机器上本来就有无关的 python 在 GPU 上（`pythonw.exe` pid 25928、`python.exe` pid 72824，分属其他 Python 安装）。必须**按 catcher 自己的 pid** 观测，否则会误判。
+- **测试**：开关默认停用会打挂 6 条既有 transcribe 测试，`conftest.py` 的 `db_env` 里统一 `monkeypatch.setattr(config, "VOICE_ENABLED", True)` 保住主测试体；停用态由新用例单独关掉测。新增 2 条：API 层 `test_transcribe_disabled`（503 + `FEATURE_DISABLED` + **records/tasks/events 各为 0 + 音频目录为空**）、DB 层 `test_claim_excludes_types`（跳 transcribe、仍能领别的类型、被排除的那条**原样留 pending**）。**pytest 30 passed**。
+- **打包**：后端沿用 onedir 流程，**只跑 PyInstaller + 部署拷贝，跳过 build.bat 第 4 步**（它会 `rmtree` 掉 `dist\.cache` 再重灌 1.5GB medium 模型，与本次无关且本次要原样保留模型）。`dist\data|tools|.cache` 三件套部署前后原样未动。
+- **验证（全过）**：dev 态 uvicorn + 打包后 `dist\backend.exe` 各验一轮 —— ①启动日志出现 `CLIP_VOICE_ENABLED=0，跳过 whisper 模型预加载（不占显存）`、**不出现**「开始预加载模型」；②`/transcribe` → 503 `FEATURE_DISABLED`；③进程不在 `nvidia-smi` 计算进程列表（ws 59MB，对比加载 medium 时常驻 ~1.5GB）；④停用后 `dist` 库计数 312/197/2 **未增**（/transcribe 一行没落）；⑤历史 voice 记录可读、content 有转写文本；⑥`POST /records` text → 200 done 正常。
+- **踩坑（观测口径）**：从控制台启动 exe 时 `sys.stderr` 非 None，launcher 的 `_setup_logging` **不落文件**、日志走继承的 stderr；只有**无控制台拉起（服务管理器场景）**才落 `dist\data\backend.log`。查日志要用 `Get-Content -Encoding utf8`（文件是 UTF-8，默认按 ANSI 读会乱码）。
+- **收尾**：测试实例已停、端口 8000 释放、注册表 `ClipBackend` 键未写入（两次都带 `CLIP_NO_AUTOSTART=1`）。**新 exe 需你通过服务管理器重启**（不让手工实例变成抢 8000 的非托管进程）。
+- **文档同步**：`CLAUDE.md` §六、`docs/architecture.md` §10.4 错误码表各加 `FEATURE_DISABLED | 503`。
+- versionCode 36→37（0.8.6）。APK `app-debug.apk` 25.44MB。
+
 ---
 
 ## 决策日志

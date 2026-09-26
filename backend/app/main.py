@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from . import config
 from . import db
 from . import transcribe as transcribe_mod
 from .errors import register_error_handlers
@@ -12,6 +13,7 @@ from .routes import health, records, tasks, transcribe
 from .worker import worker
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("main")
 
 
 @asynccontextmanager
@@ -19,7 +21,11 @@ async def lifespan(app: FastAPI):
     db.init_db()
     await worker.start()
     # 后台预加载模型（不阻塞启动）；第一个请求若赶在加载完成前，会在 get_model 里等锁
-    asyncio.create_task(transcribe_mod.preload())
+    if config.VOICE_ENABLED:
+        asyncio.create_task(transcribe_mod.preload())
+    else:
+        # 这行日志是判定依据：nvidia-smi 无占用无法区分「跳过了加载」和「没走到这段代码」
+        logger.info("CLIP_VOICE_ENABLED=0，跳过 whisper 模型预加载（不占显存）")
     yield
     await worker.stop()
 

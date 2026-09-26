@@ -33,7 +33,11 @@ class Worker:
 
     async def _loop(self):
         while self.running:
-            task = models.claim_next_pending_task()
+            # 语音停用时不再领取 transcribe 任务。当前没有生产 pending 转写任务的路径
+            # （/transcribe 已拦），这里纯粹是防御：遗留/回归的任务也不会被转写。
+            task = models.claim_next_pending_task(
+                exclude_types=() if config.VOICE_ENABLED else ("transcribe",)
+            )
             if task is None:
                 await asyncio.sleep(1.0)
                 continue

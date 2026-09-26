@@ -60,7 +60,7 @@ fun LogListScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("还没有记录，点「语音」说话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("还没有记录，点「文本」或「视频」开始。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(

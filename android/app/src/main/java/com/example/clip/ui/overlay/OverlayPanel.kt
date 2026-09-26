@@ -25,24 +25,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.clip.ClipApp
 import com.example.clip.domain.model.Record
-import com.example.clip.recorder.RecordingController
 import com.example.clip.ui.displayName
 import com.example.clip.ui.displayTitle
 import com.example.clip.ui.formatTime
 import com.example.clip.util.FileLogger
 
 /**
- * 主面板：三个按钮（语音｜文本｜视频）+ 下方记录列表（可滚动）。
- * 点语音 → 录音；点文本/视频 → 面板收起并弹对应卡片。
+ * 主面板：两个按钮（文本｜视频）+ 下方记录列表（可滚动）。
+ * 点文本/视频 → 面板收起并弹对应卡片。
+ * （语音入口已随功能停用移除，录音代码保留在 recorder/ 与 service/ 下备将来恢复。）
  */
 @Composable
 fun OverlayPanel(app: ClipApp) {
-    val context = LocalContext.current
     val records by app.repository.observeRecords().collectAsState(emptyList())
 
     Box(
@@ -56,13 +54,6 @@ fun OverlayPanel(app: ClipApp) {
     ) {
         Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        OverlayState.panelOpen.value = false
-                        RecordingController.start(context)
-                    },
-                    modifier = Modifier.weight(1f)
-                ) { Text("语音") }
                 Button(
                     onClick = {
                         OverlayState.panelOpen.value = false
@@ -83,7 +74,7 @@ fun OverlayPanel(app: ClipApp) {
             Spacer(Modifier.height(12.dp))
             if (records.isEmpty()) {
                 Text(
-                    "还没有记录，点「语音」说话。",
+                    "还没有记录，点「文本」或「视频」开始。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

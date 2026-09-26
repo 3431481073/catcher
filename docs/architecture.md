@@ -264,6 +264,7 @@
 | `UNAUTHORIZED` | 401 | 暂停队列，提示改 token |
 | `INVALID_PAYLOAD` | 400 | 标 failed，不重试 |
 | `NOT_FOUND` | 404 | 标 failed，清本地 |
+| `FEATURE_DISABLED` | 503 | 语音已停用（`CLIP_VOICE_ENABLED=0`），标 failed，不重试 |
 | `SERVER_ERROR` | 5xx | 进队列，退避 |
 | `NETWORK_UNREACHABLE` | — | 进队列，退避 |
 

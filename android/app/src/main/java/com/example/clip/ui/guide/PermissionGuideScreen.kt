@@ -52,7 +52,7 @@ fun PermissionGuideScreen(
             Spacer(Modifier.height(16.dp))
             Text("开启悬浮球", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "开启后悬浮球会浮在所有应用上方，点球唤起面板、语音录音。",
+                "开启后悬浮球会浮在所有应用上方，点球唤起面板、随时剪藏。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

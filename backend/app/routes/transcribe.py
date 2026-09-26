@@ -16,6 +16,11 @@ async def transcribe(
     audio: UploadFile = File(...),
     local_id: str = Form(...),
 ):
+    # 语音已停用（CLIP_VOICE_ENABLED=0）：拦在校验和落库之前，
+    # 不读音频、不建 record/task/event。代码与历史数据原样保留，改开关即可恢复。
+    if not config.VOICE_ENABLED:
+        raise AppError("FEATURE_DISABLED", "语音功能已停用", 503)
+
     if not local_id or not local_id.strip():
         raise AppError("INVALID_PAYLOAD", "local_id 不能为空", 400)
 

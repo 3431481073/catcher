@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Panel(
-    onSpeak: () -> Unit,
     onSubmitText: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -38,7 +37,6 @@ fun Panel(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Button(onClick = onSpeak, modifier = Modifier.weight(1f)) { Text("说话") }
                 Button(onClick = onSubmitText, modifier = Modifier.weight(1f)) { Text("提交文本") }
             }
         }

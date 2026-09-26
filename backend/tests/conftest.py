@@ -14,6 +14,9 @@ def db_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "AUDIO_DIR", tmp_path / "audio")
     monkeypatch.setattr(config, "WAV_DIR", tmp_path / "wav")
     monkeypatch.setattr(config, "TOKEN", TEST_TOKEN)
+    # 语音总开关默认停用（本文件外），但既有测试要覆盖真实 transcribe 路径，
+    # 统一在这里打开；停用态由 test_api.py 里专门的用例单独关掉。
+    monkeypatch.setattr(config, "VOICE_ENABLED", True)
     db.init_db()
     return config
 

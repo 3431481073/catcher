@@ -39,12 +39,6 @@ class MainActivity : ComponentActivity() {
         MainViewModel.factory(application, app.repository)
     }
 
-    private val micLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        viewModel.onMicPermissionResult(granted)
-    }
-
     private val notificationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
@@ -63,9 +57,6 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppRoot(
                         viewModel = viewModel,
-                        onRequestMicPermission = {
-                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        },
                         onRequestNotificationPermission = {
                             if (Build.VERSION.SDK_INT >= 33) {
                                 notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -86,11 +77,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // 前台有焦点 → 读剪贴板存缓存（供 overlay 粘贴用，Android 10+ 限制）
         ClipboardCache.init(this)
-        // 用户从设置页/引导页回来 → 重查权限，驱动引导页状态与麦克风按钮
+        // 用户从设置页/引导页回来 → 重查权限，驱动引导页状态
         Permissions.refresh(this)
-        val micGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        viewModel.onMicPermissionResult(micGranted)
     }
 
     override fun onNewIntent(intent: Intent) {
