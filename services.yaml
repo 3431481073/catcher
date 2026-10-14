@@ -1,0 +1,56 @@
+# catcher（手机剪藏）的服务声明
+#
+# 结论：有一个常驻服务。
+#
+#   1. backend.exe —— FastAPI + SQLite[WAL] + 内嵌 worker
+#      实测监听 0.0.0.0:8000
+#      🔴 它【不是本项目自己拉起来的】—— 父进程是 svcmgr.exe
+#
+#   2. SQLite / FFmpeg / worker【都不是服务】：
+#      SQLite 内嵌、FFmpeg 是 backend 调用的工具、worker 是线程。
+#      → 按 PLAYBOOK 步骤 3 的口径，不记成服务条目。
+#
+# 🔴 托管关系（本项目最重要的外部状态）：
+#    service-manager\config\projects\catcher.yaml
+#        autoStart: true
+#        restart.policy: on-failure  (maxRetries 5 / minRunTime 10s / cooldown 5m)
+#        health.startup  : http://127.0.0.1:8000/api/v1/health  1s ×30
+#        health.liveness : 同上  10s / failureThreshold 3
+#        stop.timeout    : 2s（走默认 taskkill /T）
+#        env CLIP_NO_AUTOSTART: "1"
+#
+#    ⚠️ 停不掉：policy 是 on-failure 且由管理器常驻守护 ——
+#       按 PID 杀掉会被拉回来（PLAYBOOK 步骤 11 的 remote-access 先例）。
+#       要停它，先停 service-manager 或改它的配置。
+#
+# 🔴 外部持久状态（本项目自己一处都不写）：
+#    实测（2026-10-03 只读查询）：
+#      HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+#        → 【没有 ClipBackend 这一项】
+#    为什么不写：launcher.py 的 _write_autostart() 只在【没有】CLIP_NO_AUTOSTART=1 时才执行，
+#    而服务管理器给的就是 1 —— 目的是避免开机时两边同时拉起抢 8000 端口。
+#    ⚠️ 失效模式 = 【静默】：catcher.yaml 若丢了，开机时什么都不发生，
+#       用户只会觉得"今天手机发来的记录没进来"。
+#
+# 🔴 公网入口（不在本项目里）：
+#    service-manager\config\projects\infra.yaml
+#        cloudflared:  catcher.xbywebwork.xyz  ->  http://localhost:8000
+#    安卓端 android\...\ApiConfig.kt 的 BASE_URL 指向它。
+#
+# ⚠️ 没有"别的项目在跑才能用"的前置条件：
+#    它不依赖任何别的 MyProject 项目运行。
+#    （但它【被】四方依赖 —— 见 docs/deps.md，那是"被别人用"，不是"依赖别人"。）
+
+services:
+  - name: catcher-backend
+    description: 手机剪藏后端（FastAPI + SQLite[WAL] + 内嵌 worker）
+    command: D:\MyProject\catcher\backend\dist\backend.exe
+    args: ["--autostart"]
+    cwd: D:\MyProject\catcher\backend\dist
+    host: 0.0.0.0
+    port: 8000
+    health: http://127.0.0.1:8000/api/v1/health
+    manager: service-manager          # autoStart: true / restart: on-failure
+    logs: D:\MyProject\service-manager\data\logs\catcher\
+    public_entry: https://catcher.xbywebwork.xyz/   # via cloudflared
+    persistent: true

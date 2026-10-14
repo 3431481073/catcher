@@ -76,7 +76,8 @@ class RecordRepositoryImpl(
                 attempts = item.attempts,
                 nextAttemptAt = item.nextAttemptAt,
                 createdAt = TimeUtil.nowIso(),
-                updatedAt = TimeUtil.nowIso()
+                updatedAt = TimeUtil.nowIso(),
+                kind = item.kind
             )
         )
     }
@@ -114,7 +115,8 @@ class RecordRepositoryImpl(
         payload = payload,
         status = status,
         attempts = attempts,
-        nextAttemptAt = nextAttemptAt
+        nextAttemptAt = nextAttemptAt,
+        kind = kind
     )
 
     private fun Record.toEntity(): RecordEntity = RecordEntity(

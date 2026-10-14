@@ -7,6 +7,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,11 +24,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -44,32 +44,75 @@ import com.example.clip.ui.displayName
 import com.example.clip.ui.displayTitle
 import com.example.clip.ui.formatTime
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogListScreen(
     records: List<Record>,
     onRecordClick: (Record) -> Unit,
+    /** 顶部的「没开使用情况访问」提示条要不要显示（判断在 MainScreen 里）。 */
+    showUsageHint: Boolean = false,
+    onOpenUsageSettings: () -> Unit = {},
+    onDismissUsageHint: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    Scaffold(
-        modifier = modifier,
-        topBar = { TopAppBar(title = { Text("剪藏") }) }
-    ) { padding ->
+    // 顶部 chrome（TopAppBar + TabRow）现在归 MainScreen —— 这里只画内容。
+    // 原来这里自带 Scaffold+TopAppBar，加 Tab 后会变成嵌套 Scaffold。
+    Column(modifier = modifier.fillMaxSize()) {
+        if (showUsageHint) UsageHintBanner(onOpenUsageSettings, onDismissUsageHint)
+
         if (records.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
                 Text("还没有记录，点「文本」或「视频」开始。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 items(records, key = { it.localId }) { record ->
                     LogListItem(record = record, onClick = { onRecordClick(record) })
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 「没开使用情况访问」提示条。
+ *
+ * 存在意义：**这个权限缺了是完全静默的** —— 引导页过后用户再也不会看到它，
+ * 采集则一条不出。不提示的话，"装了但没数据"和"采集坏了"长得一模一样，
+ * 正是本项目最忌讳的那种失效。
+ *
+ * 用 secondaryContainer 而不是 errorContainer：这不是错误，是「少开了一个开关」，
+ * 而且要和 MainScreen 里那条 Token 失效的红色横幅**一眼区分开**。
+ *
+ * 两行布局（正文一行、按钮一行）：挤成一行的话「去开启」+「不再提示」两个按钮会把
+ * 正文压到三行，窄屏上很难看。
+ */
+@Composable
+private fun UsageHintBanner(onOpen: () -> Unit, onDismiss: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        tonalElevation = 2.dp
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 2.dp)) {
+            Text(
+                text = "未开启「使用情况访问」，App 使用时长不会采集",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onOpen) { Text("去开启") }
+                TextButton(onClick = onDismiss) { Text("不再提示") }
             }
         }
     }

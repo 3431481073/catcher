@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -9,6 +10,35 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      App 使用时长采集（2026-10-11 新增）。
+
+      PACKAGE_USAGE_STATS 是**特殊权限**，不在普通权限列表里：声明它**不会**弹授权框，
+      只是让「使用情况访问」这一项在本 App 的系统设置里可见。真授权是走 AppOps 的，
+      查询见 util/Permissions.isUsageAccessGranted。
+
+      QUERY_ALL_PACKAGES 是 Android 11+ 用来"看见别的 App"的。没有它，
+      getApplicationInfo 对别的包名直接抛 NameNotFoundException —— 也就是说
+      **拿不到 App 可读名**（包名本身仍然拿得到，因为它来自使用事件）。
+      本 App 不发布到 Google Play，不受它的上架政策限制。
+    -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!--
+      电池优化白名单（2026-10-12 新增）。
+
+      🔴 **它是 `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 的前置条件** ——
+      没有这条声明，那个 action **会被系统静默忽略**（点了「去设置」什么都不发生）。
+      ⚠️ Google Play 对上架应用限制这个权限；**本项目不上架**，所以可用。
+      （代码里还有两层兜底：退到白名单列表页、再退到应用详情页 —— 见 Permissions.openBatterySettings。）
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".ClipApp"

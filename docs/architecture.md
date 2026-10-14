@@ -256,6 +256,13 @@
 | 7 | DELETE | `/api/v1/records/{id}` | 软删 |
 | 8 | GET | `/api/v1/tasks/{id}` | 任务状态 |
 | 9 | POST | `/api/v1/tasks/{id}/retry` | 重试 |
+| 10 | POST | `/api/v1/usage` | App 使用时长的**原始事件上报**（M9） |
+| 11 | GET | `/api/v1/usage` | 按时段列"段"（M9） |
+| 12 | GET | `/api/v1/usage/summary` | 按 App 汇总时长（M9） |
+| 13 | POST | `/api/v1/usage/trigger` | 让手机立刻采一次（M9，走 WS 推 `trigger_usage`） |
+
+> ⚠️ 第 7、9 条**路由尚未实现**（M5 的活）；第 10~13 条是 **M9**（2026-10-11）新增。
+> 🔴 **第 10~13 条不返回 `RecordDTO`** —— 形状见下面 **§10.8**。
 
 ### 10.4 错误码
 
@@ -264,7 +271,9 @@
 | `UNAUTHORIZED` | 401 | 暂停队列，提示改 token |
 | `INVALID_PAYLOAD` | 400 | 标 failed，不重试 |
 | `NOT_FOUND` | 404 | 标 failed，清本地 |
+| `CONFLICT` | 409 | 上游状态冲突（Lattice 的确认框已过期等），刷新自愈，不展示技术细节 |
 | `FEATURE_DISABLED` | 503 | 语音已停用（`CLIP_VOICE_ENABLED=0`），标 failed，不重试 |
+| `LATTICE_UNAVAILABLE` | 503 | Lattice 未运行 / 数据口连不上，显示横幅并继续轮询（远端可达即自愈） |
 | `SERVER_ERROR` | 5xx | 进队列，退避 |
 | `NETWORK_UNREACHABLE` | — | 进队列，退避 |
 
@@ -302,6 +311,52 @@
 3. `GET /tasks/{id}` 返回完整 `RecordDTO`：前端一次更新。
 4. 软删对 `GET /records/{id}` 和 `PATCH` 返回 404。
 5. 视频 `record.status=done`, `task.status=skipped`。
+
+### 10.8 App 使用时长（M9，2026-10-11）
+
+> 需求来自 `snapshot` 项目。**这一节是新增的，上面 §10.1~§10.7 一字未动**（不重编号，
+> 因为别处的文档引用的是 `§10.3` / `§10.4` 这些编号）。
+
+**分工的硬边界：手机只做「拉 / 存 / 发」，后端做全部计算。**
+
+| 谁 | 做什么 | 不做什么 |
+|---|---|---|
+| **Android** | `UsageStatsManager.queryEvents` 拉原始事件 → 本地 Room 缓冲 → 批量上报 | ❌ 不配对、❌ 不算时长、❌ 不去重 |
+| **后端** | 配对成"段" · 去重 · 覆盖 · 跨批续段 · 汇总 | — |
+
+**为什么配对一定要在后端**：配对要跨批、要知道锁屏和换 App 的顺序 ——
+手机上存不下那个状态（进程被杀、跨天、回溯 7 天都要求它一直在）。
+
+**新增两张表**（同一个 `app.db`，**`records` / `tasks` 的列一个没动**）：
+
+| 表 | 是什么 | 键 |
+|---|---|---|
+| `usage_records` | 配对好的段 | **唯一** `(device_id, package_name, start_time)` |
+| `usage_pending` | 每设备**还没闭合**的当前段 | `device_id` 主键 |
+
+**配对的四条边界**（写死在后端，`app/usage.py`）：
+
+| 事件 | 动作 |
+|---|---|
+| `ACTIVITY_RESUMED(pkg)` | 关掉当前段，开新段 |
+| `ACTIVITY_PAUSED(pkg)` | 仅当当前段就是该 pkg 才关；否则忽略 |
+| `SCREEN_NON_INTERACTIVE` / `KEYGUARD_SHOWN` | 关掉当前段 |
+| `SCREEN_INTERACTIVE` / `KEYGUARD_HIDDEN` | **不关** —— 熄屏再点亮回到的往往还是同一个 App，断段会把一段真实使用切成两截 |
+
+**采集的三个触发**（对应不变量 6「用户不等处理」）：
+
+| 触发 | 周期 | 说明 |
+|---|---|---|
+| WorkManager 周期任务 | **15 分钟** | 🔴 **这是 WorkManager 允许的最小周期**；Doze 下会被推迟 |
+| App 启动 / 回前台 | — | 进程已活着，直接调，不绕 WorkManager |
+| `POST /usage/trigger` → WS | 手动 | 🔴 **只在手机开着「远程」Tab 时有效**（那条 WS 的寿命） |
+
+> 🔴 **15 分钟不是数据完整性的前提**：拉取区间永远是「上次扫到的时间 − 5 分钟 到 now」，
+> 所以被推迟 3 小时也只是这一次多拉 3 小时的事件，**中间不会漏**。
+> 那 5 分钟重叠是留给"正好跨在两次扫描之间"的段的 —— 宁可重复（两端都去重），不能漏。
+
+**系统限制（不是本项目的缺陷）**：`queryEvents` 一般只保留最近 **1~7 天**。
+App 8 天没跑，中间那段**拿不回来**。见 [`run.md`](run.md)。
 
 ---
 

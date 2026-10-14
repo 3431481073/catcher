@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -13,8 +13,15 @@ android {
         applicationId = "com.example.clip"
         minSdk = 29
         targetSdk = 34
-        versionCode = 37
-        versionName = "0.8.6"
+        versionCode = 65
+        versionName = "0.13.8"
+
+        // sherpa-onnx 的 AAR 带 4 个 ABI 的原生库（libonnxruntime.so + libsherpa-onnx-jni.so）。
+        // 只留真机（arm64-v8a）和模拟器（x86_64）—— 砍掉 armeabi-v7a / x86 能把每个 ABI
+        // 约 13MB 的原生库省下来。要换设备再动这里。
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -39,6 +46,17 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // 模型是 .onnx，压缩它既省不了多少、又会让 sherpa 的内存映射读法失去意义。
+    androidResources {
+        noCompress += "onnx"
+    }
+}
+
+// Room 的 schema 导出目录：每次构建产出 app/schemas/<库名>/<版本>.json。
+// 它是**期望 schema 的比对物**（见 AppDatabase 里 exportSchema 的说明），要提交进仓库。
+ksp {
+    arg("room.schemaLocation", "${projectDir}/schemas")
 }
 
 dependencies {
@@ -74,4 +92,8 @@ dependencies {
 
     // M4: WorkManager（上传重试队列）
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // 本地 ASR：sherpa-onnx（包名固定 com.k2fsa.sherpa.onnx，JNI 绑定写死不能改）
+    // 版本锁 v1.12.40 —— JitPack 是按需构建，v1.13.8 的 aar 实测 404（还没构建）
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.12.40")
 }

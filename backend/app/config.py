@@ -40,6 +40,25 @@ VOICE_ENABLED = os.environ.get("CLIP_VOICE_ENABLED", "0") != "0"
 # FFmpeg 可执行文件路径（项目内静态版）
 FFMPEG_PATH = os.environ.get("CLIP_FFMPEG_PATH", str(TOOLS_DIR / "ffmpeg.exe"))
 
+# ── Lattice 远程转发（手机 → 本后端 → 127.0.0.1:<Lattice 端口>）─────────────
+# Lattice 的数据口端口是随机的（44770+），每次请求都要重读它写的发现文件。
+#
+# 🔴 用 Path.home() 展开，不写死 C:\Users\asus —— 换启动身份/换机器时不会静默失联。
+# 注意这与 service-manager 的 infra.yaml 相反：那里给 cloudflared 写死了路径，
+# 并在注释里说明了理由（不依赖 USERPROFILE）。这里没有那个理由，用展开更稳。
+#
+# LATTICE_HOME 可覆盖是【测试能离线跑的关键】——测试把它指到 tmp_path。
+LATTICE_HOME = Path(os.environ.get("LATTICE_HOME") or (Path.home() / ".lattice"))
+LATTICE_API_DIR = LATTICE_HOME / "api"
+# Lattice 实例的发现文件（"最近启动的那个实例"）。不是独立进程时它就是唯一的实例信息源。
+LATTICE_DISCOVERY_FILE = LATTICE_API_DIR / "current.json"
+
+# 超时必须紧：Lattice 卡死时不能让手机的轮询请求堆积。
+# connect 短（loopback 被拒是毫秒级）、read 稍长（渲染层要现算窗格状态）。
+LATTICE_CONNECT_TIMEOUT = float(os.environ.get("CLIP_LATTICE_CONNECT_TIMEOUT", "2"))
+LATTICE_READ_TIMEOUT = float(os.environ.get("CLIP_LATTICE_READ_TIMEOUT", "10"))
+LATTICE_WRITE_TIMEOUT = float(os.environ.get("CLIP_LATTICE_WRITE_TIMEOUT", "5"))
+
 # HuggingFace 模型缓存 + 国内镜像（在 faster_whisper 导入前生效；可用 env 覆盖）
 os.environ.setdefault("HF_HOME", str(BASE_DIR / ".cache" / "huggingface"))
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")

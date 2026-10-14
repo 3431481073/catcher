@@ -60,3 +60,29 @@ data class CreateRecordRequest(
 data class PatchRecordRequest(
     @SerializedName("append_note") val appendNote: NoteDto? = null
 )
+
+// ── App 使用时长上报（POST /api/v1/usage）─────────────────────
+// 发的是**原始事件流**，不是配好的段 —— 配对全在后端（app/usage.py）。
+
+data class UsageEventPayload(
+    @SerializedName("event_type") val eventType: Int,
+    @SerializedName("timestamp_ms") val timestampMs: Long,
+    @SerializedName("package_name") val packageName: String?
+)
+
+/**
+ * @param labels `{包名: 可读名}`。**每次把本批出现的包名都带上**（不做"只传首次"的状态）——
+ *   幂等，后端 `COALESCE` 覆盖，空值不会把已有的名字抹掉。
+ */
+data class UsageReportRequest(
+    @SerializedName("device_id") val deviceId: String,
+    val events: List<UsageEventPayload>,
+    val labels: Map<String, String> = emptyMap()
+)
+
+/** 后端回执：收下几段 / 其中几段是覆盖 / 几条事件认不出类型被丢掉。 */
+data class UsageReportData(
+    val accepted: Int = 0,
+    val duplicates: Int = 0,
+    val unknown: Int = 0
+)

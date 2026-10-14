@@ -7,9 +7,12 @@ from fastapi import FastAPI
 
 from . import config
 from . import db
+from . import lattice
 from . import transcribe as transcribe_mod
 from .errors import register_error_handlers
 from .routes import health, records, tasks, transcribe
+from .routes import lattice as lattice_routes
+from .routes import usage as usage_routes
 from .worker import worker
 
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +31,8 @@ async def lifespan(app: FastAPI):
         logger.info("CLIP_VOICE_ENABLED=0，跳过 whisper 模型预加载（不占显存）")
     yield
     await worker.stop()
+    # 转发用的 httpx client 是懒加载的，没被用过就没什么可关的
+    await lattice.aclose()
 
 
 app = FastAPI(title="手机剪藏", lifespan=lifespan)
@@ -37,3 +42,9 @@ app.include_router(health.router)
 app.include_router(transcribe.router)
 app.include_router(records.router)
 app.include_router(tasks.router)
+app.include_router(lattice_routes.router)
+app.include_router(usage_routes.router)
+# WS 单独一条 router：它**不能**挂 verify_token 的依赖
+# （FastAPI 的异常处理器对 WebSocket 不生效，鉴权失败会变成半截连接），
+# 所以鉴权在端点里手动做 —— 见 routes/lattice.py 里 ws_router 上方那段注释。
+app.include_router(lattice_routes.ws_router)

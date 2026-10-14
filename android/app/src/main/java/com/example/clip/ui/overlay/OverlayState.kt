@@ -26,11 +26,12 @@ data class PendingVideo(val title: String?, val url: String?, val platform: Stri
  *
  * 状态机（只有语音走 REC→BUSY→DONE，文本/视频直达 DONE）：
  * ```
- * IDLE ──录音──▶ REC ──停止──▶ BUSY ──转写完成──▶ DONE_VOICE ──2s──▶ IDLE
- *                                   └─失败──────────▶ IDLE
- * IDLE ──提交文本──▶ DONE_TEXT ──2s──▶ IDLE
- * IDLE ──提交视频──▶ DONE_VIDEO ──2s──▶ IDLE
+ * IDLE ──录音──▶ REC ──停止──▶ BUSY ──识别完成──▶ DONE_VOICE ──1.5s──▶ IDLE
+ *                                   └─失败/空文本────▶ FAILED ──1.5s──▶ IDLE
+ * IDLE ──提交文本──▶ DONE_TEXT ──1.5s──▶ IDLE
+ * IDLE ──提交视频──▶ DONE_VIDEO ──1.5s──▶ IDLE
  * ```
+ * 闪色时长见闪色默认值 [flash]（1500ms）。
  */
 object OverlayState {
 
@@ -71,22 +72,20 @@ object OverlayState {
 
     fun onVoiceDone() {
         _isBusy.value = false
-        if (RecordingController.recordingDestination.value == VoiceDestination.CLIPBOARD) {
-            flash(BallVisualState.DONE_VOICE)
-        } else {
-            // 卡片语音：填输入框，不闪色
-            _ballState.value = BallVisualState.IDLE
-        }
+        // 剪贴板与本机 ASR 都闪绿勾；卡片语音（BODY/NOTE）的结果要填进输入框，不闪色
+        if (isCardVoice()) _ballState.value = BallVisualState.IDLE
+        else flash(BallVisualState.DONE_VOICE)
     }
 
     fun onVoiceFailed() {
         _isBusy.value = false
-        if (RecordingController.recordingDestination.value == VoiceDestination.CLIPBOARD) {
-            flash(BallVisualState.FAILED)
-        } else {
-            // 卡片语音失败：球回 idle，卡片自己提示失败
-            _ballState.value = BallVisualState.IDLE
-        }
+        if (isCardVoice()) _ballState.value = BallVisualState.IDLE
+        else flash(BallVisualState.FAILED)
+    }
+
+    private fun isCardVoice(): Boolean {
+        val d = RecordingController.recordingDestination.value
+        return d == VoiceDestination.BODY || d == VoiceDestination.NOTE
     }
 
     // ---- 文本/视频提交状态机：提交→busy，后端确认成功→done，失败→idle ----

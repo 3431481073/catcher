@@ -25,23 +25,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.clip.ClipApp
 import com.example.clip.domain.model.Record
+import com.example.clip.recorder.RecordingController
 import com.example.clip.ui.displayName
 import com.example.clip.ui.displayTitle
 import com.example.clip.ui.formatTime
 import com.example.clip.util.FileLogger
 
 /**
- * 主面板：两个按钮（文本｜视频）+ 下方记录列表（可滚动）。
+ * 主面板：三个按钮（录音｜文本｜视频）+ 下方记录列表（可滚动）。
  * 点文本/视频 → 面板收起并弹对应卡片。
- * （语音入口已随功能停用移除，录音代码保留在 recorder/ 与 service/ 下备将来恢复。）
+ * 点录音 → 面板收起、球变红开始录（本机 ASR，音频不出手机）。
  */
 @Composable
 fun OverlayPanel(app: ClipApp) {
     val records by app.repository.observeRecords().collectAsState(emptyList())
+    val context = LocalContext.current
 
     Box(
         Modifier
@@ -54,6 +57,15 @@ fun OverlayPanel(app: ClipApp) {
     ) {
         Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        FileLogger.i("OverlayPanel", "点录音按钮 → 收起面板，开始本机 ASR")
+                        OverlayState.panelOpen.value = false
+                        // 没有麦克风权限时它会拉起到 MainActivity 申请，授权后自动接着录
+                        RecordingController.startLocalAsr(context)
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("录音") }
                 Button(
                     onClick = {
                         OverlayState.panelOpen.value = false
@@ -74,7 +86,7 @@ fun OverlayPanel(app: ClipApp) {
             Spacer(Modifier.height(12.dp))
             if (records.isEmpty()) {
                 Text(
-                    "还没有记录，点「文本」或「视频」开始。",
+                    "还没有记录，点「录音」「文本」或「视频」开始。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -17,7 +17,11 @@ import com.example.clip.domain.model.Record
 import com.example.clip.domain.model.RecordStatus
 import com.example.clip.domain.model.RecordType
 import com.example.clip.domain.model.SyncStatus
+import com.example.clip.recorder.LocalAsrRecorder
 import com.example.clip.recorder.RecordingController
+import com.example.clip.recorder.VoiceDestination
+import com.example.clip.ui.overlay.OverlayState
+import com.example.clip.util.FileLogger
 import com.example.clip.util.Ids
 import com.example.clip.util.TimeUtil
 import kotlinx.coroutines.runBlocking
@@ -38,6 +42,9 @@ class RecordingService : Service() {
     @Volatile private var outputFile: File? = null
     @Volatile private var localId: String? = null
 
+    /** 本机 ASR 那条路的录音器（destination == LOCAL_ASR 时才非 null）。 */
+    @Volatile private var localRecorder: LocalAsrRecorder? = null
+
     /** 振幅采样（主线程 100ms 循环），读 recorder.maxAmplitude。 */
     private val amplitudeSampler = object : Runnable {
         override fun run() {
@@ -57,9 +64,15 @@ class RecordingService : Service() {
             ACTION_START -> {
                 // 首行 startForeground（Android 12+ 5 秒限制）
                 startForeground(NOTIF_ID, buildRecordingNotification())
-                executor.execute { doStartRecording() }
+                // 两条路共用这个前台服务（它已经有 foregroundServiceType=microphone），
+                // 按 destination 分流：LOCAL_ASR 走 AudioRecord + 本机识别，其余走老 MediaRecorder
+                val local = RecordingController.recordingDestination.value == VoiceDestination.LOCAL_ASR
+                executor.execute { if (local) doStartLocalAsr() else doStartRecording() }
             }
-            ACTION_STOP -> executor.execute { doStopRecording() }
+            // executor 是单线程的：STOP 一定排在 START 之后，不用额外同步
+            ACTION_STOP -> executor.execute {
+                if (localRecorder != null) localRecorder?.stop() else doStopRecording()
+            }
             else -> stopSelf()
         }
         return START_NOT_STICKY
@@ -153,6 +166,36 @@ class RecordingService : Service() {
         }
     }
 
+    // ── 本机 ASR 那条路（destination = LOCAL_ASR）──────────────────────────
+    // 与老路的关键差别：**不写 OGG、不建 PROCESSING 记录、不排 UPLOAD 队列**。
+    // 音频根本不落盘，识别完只把文本交出去。
+
+    private fun doStartLocalAsr() {
+        if (localRecorder != null) return
+        val r = LocalAsrRecorder(
+            assets = assets,
+            onAmplitude = { RecordingController.updateAmplitude(it) },
+            onDone = { text -> onLocalAsrDone(text) },
+        )
+        localRecorder = r
+        r.start()
+    }
+
+    /** 识别结束（在录音线程上回调）：三件事 + 球状态，然后把服务收掉。 */
+    private fun onLocalAsrDone(text: String?) {
+        localRecorder = null
+        val app = application as ClipApp
+        if (text.isNullOrBlank()) {
+            FileLogger.i(TAG, "本机识别结果为空 → 闪红叉")
+            OverlayState.onVoiceFailed()
+        } else {
+            FileLogger.i(TAG, "本机识别完成：${text.length} 字")
+            OverlayActions.submitLocalVoice(app, text)  // 剪贴板 + 落 Room + 排上传
+            OverlayState.onVoiceDone()                  // 闪绿勾 1.5s
+        }
+        finish()
+    }
+
     private fun finish() {
         mainHandler.post {
             if (Build.VERSION.SDK_INT >= 33) stopForeground(STOP_FOREGROUND_REMOVE) else stopForeground(true)
@@ -165,6 +208,10 @@ class RecordingService : Service() {
         mainHandler.removeCallbacks(amplitudeSampler)
         recorder?.runCatching { stop(); release() }
         recorder = null
+        // 本机 ASR：只请求停止，不硬断 —— 让录音线程把已录到的收完尾音、
+        // 跑完最后一次 decode，能捞回多少文本算多少（onDone 里照常落库）。
+        localRecorder?.stop()
+        localRecorder = null
         super.onDestroy()
     }
 
@@ -183,6 +230,7 @@ class RecordingService : Service() {
     }
 
     companion object {
+        private const val TAG = "RecordingService"
         private const val ACTION_START = "com.example.clip.recording.START"
         private const val ACTION_STOP = "com.example.clip.recording.STOP"
         private const val NOTIF_ID = 1001

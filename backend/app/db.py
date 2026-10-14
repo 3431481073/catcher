@@ -54,6 +54,37 @@ CREATE TABLE IF NOT EXISTS events (
 
 -- 故意不给 events(id) 建索引：id 是 INTEGER PRIMARY KEY 即 rowid，SQLite 已为它维护 B-tree，
 -- 外部程序按 id 游标（WHERE id > ?）走的正是这棵树；再加一个同列索引只是重复占盘 + 拖慢 INSERT。
+
+-- ── App 使用时长（2026-10-11 新增）──────────────────────────────
+-- 配对好的"段"。手机只上报原始事件，配对在 app/usage.py 里做。
+CREATE TABLE IF NOT EXISTS usage_records (
+  id               TEXT PRIMARY KEY,      -- usage_ + uuid
+  device_id        TEXT NOT NULL,
+  package_name     TEXT NOT NULL,
+  app_label        TEXT,                  -- 可读名，手机端解析后随事件一起来
+  start_time       TEXT NOT NULL,         -- ISO8601 UTC，与 records 同格式（定宽，可字符串比较）
+  end_time         TEXT NOT NULL,
+  duration_seconds INTEGER NOT NULL,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+);
+
+-- 🔴 唯一键 = 段的身份。它同时承担两件事：
+--   ① 重复上报去重；② 「上次扫描被截断 → 这次完整」的覆盖（两次 start_time 相同 ⇒ 命中）。
+CREATE UNIQUE INDEX IF NOT EXISTS ux_usage_seg
+  ON usage_records(device_id, package_name, start_time);
+-- 查询几乎全是"某天/某区间"，start_time 是唯一的过滤列
+CREATE INDEX IF NOT EXISTS idx_usage_start ON usage_records(start_time);
+
+-- 每设备一条：**还没闭合**的当前段。
+-- 🔴 用表不用内存 —— uvicorn 由 service-manager 全权管启停，放内存里一重启就丢，
+--    而"跨批续段"（App 被杀的断档段要能补上）恰恰依赖它活过两次上报之间。
+CREATE TABLE IF NOT EXISTS usage_pending (
+  device_id    TEXT PRIMARY KEY,
+  package_name TEXT NOT NULL,
+  start_time   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
 """
 
 

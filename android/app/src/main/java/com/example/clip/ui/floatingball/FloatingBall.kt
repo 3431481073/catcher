@@ -16,7 +16,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -69,13 +68,15 @@ fun FloatingBall(
     }
 }
 
-/** 球中心图标：idle 圆点 / rec 麦克风 / busy 转圈 / done 对勾 / failed 叉。 */
+/** 球中心图标：idle 圆点 / **rec 不画图标（只留竖条）** / busy 转圈 / done 对勾 / failed 叉。 */
 @Composable
 private fun BallIcon(state: BallVisualState) {
     when (state) {
         BallVisualState.IDLE ->
             Box(Modifier.size(8.dp).background(Color.White.copy(alpha = 0.9f), CircleShape))
-        BallVisualState.REC -> MicIcon(Modifier.size(20.dp))
+        // 录音时球心只画那 5 根竖条（InnerWaveform），不叠麦克风图标 ——
+        // 图标会跟竖条抢中间那块地方，反而看不清条的高低。
+        BallVisualState.REC -> {}
         BallVisualState.BUSY -> SpinnerIcon(Modifier.size(18.dp))
         BallVisualState.DONE_VOICE, BallVisualState.DONE_TEXT, BallVisualState.DONE_VIDEO ->
             CheckIcon(Modifier.size(20.dp))
@@ -83,30 +84,29 @@ private fun BallIcon(state: BallVisualState) {
     }
 }
 
-/** rec：球内横着的波形（中间高两边低的竖条），整体高度随音量联动，没声音塌成平线。 */
+/**
+ * rec：球内 5 根竖条，高度 profile `[0.15, 0.5, 1.0, 0.5, 0.15]`（中间那根是两端的 6~7 倍）。
+ *
+ * 🔴 **这里不做任何平滑** —— "快上慢落"的包络和 1.4 倍增益都在**数据层**
+ * （`LocalAsrRecorder.feed()`）做完了，到这里的 `amplitude` 已经是"该显示多少就是多少"。
+ * 渲染层是 60fps 重绘的，在这里再平滑一遍会让条的跳法**依赖掉帧情况** —— 数据层（31Hz）才是唯一真相。
+ *
+ * 没声音时 halfH = 0，圆头直线退化成看不见的点，不需要额外分支去画"平线"。
+ */
 @Composable
 private fun InnerWaveform(amplitude: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val w = size.width
         val cy = size.height / 2f
         val a = amplitude.coerceIn(0f, 1f)
-        if (a < 0.03f) {
-            // 没声音：平线
-            drawLine(
-                Color.White.copy(alpha = 0.5f),
-                Offset(w * 0.22f, cy), Offset(w * 0.78f, cy),
-                strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round
-            )
-            return@Canvas
-        }
-        val barCount = 7
+        val profile = floatArrayOf(0.15f, 0.5f, 1f, 0.5f, 0.15f)
+        val barCount = profile.size
         val barW = 2.5.dp.toPx()
         val gap = 3.dp.toPx()
         val maxHalfH = 9.dp.toPx()
         val mid = (barCount - 1) / 2f
         for (i in 0 until barCount) {
-            val env = 1f - kotlin.math.abs(i - mid) / mid
-            val halfH = maxHalfH * env * a
+            val halfH = maxHalfH * profile[i] * a
             val x = w / 2f + (i - mid) * (barW + gap)
             drawLine(
                 Color.White,
@@ -131,37 +131,6 @@ private fun InnerBusyPulse(modifier: Modifier = Modifier) {
             Color.White.copy(alpha = 0.05f + 0.15f * t),
             radius = size.minDimension / 2f,
             center = center
-        )
-    }
-}
-
-@Composable
-private fun MicIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        val cx = w / 2f
-        val stroke = 2.dp.toPx()
-        val capsuleW = 7.dp.toPx()
-        val capsuleH = 11.dp.toPx()
-        val capsuleTop = 1.dp.toPx()
-        drawRoundRect(
-            color = Color.White,
-            topLeft = Offset(cx - capsuleW / 2f, capsuleTop),
-            size = Size(capsuleW, capsuleH),
-            cornerRadius = CornerRadius(capsuleW / 2f)
-        )
-        val stemTop = capsuleTop + capsuleH
-        val stemBottom = h - 4.dp.toPx()
-        drawLine(Color.White, Offset(cx, stemTop), Offset(cx, stemBottom), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawArc(
-            color = Color.White,
-            startAngle = 0f,
-            sweepAngle = 180f,
-            useCenter = false,
-            topLeft = Offset(cx - 5.dp.toPx(), stemBottom - 2.dp.toPx()),
-            size = Size(10.dp.toPx(), 5.dp.toPx()),
-            style = Stroke(width = stroke, cap = StrokeCap.Round)
         )
     }
 }

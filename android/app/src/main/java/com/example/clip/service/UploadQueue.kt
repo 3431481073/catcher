@@ -25,6 +25,15 @@ import kotlinx.coroutines.launch
  */
 object UploadQueue {
 
+    /**
+     * App 使用事件上报的**固定主体 id**。
+     *
+     * 全部事件共用**一个**队列行（不是"一批一行"）：一批一行就要在 `payload` 里存 id 列表、
+     * 要处理"并发两批"、还要处理"队列行比事件多"。固定一行 + 每次取一批（有剩就再排一轮）
+     * 状态少得多，而且 `ExistingWorkPolicy.KEEP` 天然防重入。
+     */
+    const val USAGE_SUBJECT = "usage"
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var appContext: Context? = null
 
@@ -38,9 +47,35 @@ object UploadQueue {
         registerNetworkCallback(app)
     }
 
+    /**
+     * App 使用事件：**有 pending 就确保队列行存在并投递**，没有就什么都不做。幂等。
+     *
+     * 队列行只在缺失时才插 —— 已经有了就别动，否则 `REPLACE` 会把 `attempts` 清零，
+     * 正在退避的那一条会被无限重置。
+     */
+    suspend fun enqueueUsageIfPending(app: ClipApp) {
+        val dao = app.database.usageEventDao()
+        if (dao.countPending() == 0) return
+        val repo = app.repository
+        if (repo.getQueue(USAGE_SUBJECT) == null) {
+            repo.insertQueue(
+                QueueItem(
+                    recordLocalId = USAGE_SUBJECT,
+                    operation = UploadWorker.OP_UPLOAD,
+                    payload = null,
+                    status = UploadWorker.STATUS_PENDING,
+                    attempts = 0,
+                    nextAttemptAt = TimeUtil.nowIso(),
+                    kind = QueueItem.KIND_USAGE,
+                )
+            )
+        }
+        scheduleNow(app, USAGE_SUBJECT, QueueItem.KIND_USAGE)
+    }
+
     /** 立即投递（写操作后 / 补 PATCH 后），expedited 减少首传延迟。 */
-    fun scheduleNow(app: ClipApp, localId: String) {
-        enqueue(app, localId)
+    fun scheduleNow(app: ClipApp, localId: String, kind: String = QueueItem.KIND_RECORD) {
+        enqueue(app, localId, kind)
     }
 
     private suspend fun schedule(items: List<QueueItem>, force: Boolean) {
@@ -49,25 +84,32 @@ object UploadQueue {
         items.forEach { item ->
             val dueAt = item.nextAttemptAt?.let { TimeUtil.parseMillis(it) } ?: 0L
             if (force || dueAt <= now) {
-                enqueue(ctx, item.recordLocalId)
+                enqueue(ctx, item.recordLocalId, item.kind)
             } else {
                 val delayMs = dueAt - now
                 scope.launch {
                     delay(delayMs)
-                    enqueue(ctx, item.recordLocalId)
+                    enqueue(ctx, item.recordLocalId, item.kind)
                 }
             }
         }
     }
 
-    private fun enqueue(ctx: Context, localId: String) {
+    /**
+     * 唯一工作名带上 kind。
+     *
+     * 记录的 id 是 `loc_...`、usage 的是固定串 `usage`，本来也不会撞；带上 kind 是为了
+     * **在 WorkManager 的列表里一眼看出这条是谁的**，而且将来若有别的 kind 用了同一个 id，
+     * 名字不同能避免互相 KEEP 掉。
+     */
+    private fun enqueue(ctx: Context, localId: String, kind: String) {
         val request = OneTimeWorkRequestBuilder<UploadWorker>()
             .setInputData(workDataOf(UploadWorker.KEY_LOCAL_ID to localId))
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
         WorkManager.getInstance(ctx).enqueueUniqueWork(
-            "upload_$localId",
+            "upload_${kind}_$localId",
             ExistingWorkPolicy.KEEP,
             request
         )

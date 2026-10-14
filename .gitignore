@@ -35,3 +35,14 @@ android/local.properties
 
 # ---- 测试素材 ----
 backend/test.webm
+
+# ---- 模型与共享路由（止血层）----
+# 🔴 下面这些的归属地不在这里，这里只挡体积，不是"模型就该待在项目里"。
+#    模型应搬进 _shared/models/；
+#    代码要引用模型，走 _shared/routes.yaml 里登记的逻辑名。
+#    出处：PLAYBOOK 步骤 7「模型与共享路由」。
+android/app/src/main/assets/paraformer-small/model.int8.onnx
+android/app/src/main/assets/punct-ct-transformer-zh/model.int8.onnx
+android/app/src/main/assets/silero_vad.onnx
+android/app/src/main/assets/paraformer-small/tokens.txt
+backend/.rollback/

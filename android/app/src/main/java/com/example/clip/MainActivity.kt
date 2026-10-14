@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +16,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import com.example.clip.recorder.RecordingController
+import com.example.clip.recorder.VoiceDestination
 import com.example.clip.service.FloatingBallService
 import com.example.clip.service.OverlayActions
 import com.example.clip.ui.AppRoot
@@ -45,6 +48,28 @@ class MainActivity : ComponentActivity() {
         Permissions.refresh(this)
     }
 
+    /**
+     * 麦克风权限。面板上的「录音」按钮在悬浮窗里，那里调不了 requestPermissions，
+     * 所以由 RecordingController 带着 EXTRA_REQUEST_MIC 把用户拉到这里来。
+     *
+     * 授权结果分三种：本来就不是为录音申请的（isPending=false，什么也不做）；
+     * 授权通过 → 接着把录音启起来（用户只按了一次，不该让他再点一次）；
+     * 拒绝 → Toast 说清楚，球不动。
+     */
+    private val micLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        // 不是为录音申请的（比如别处顺手调的）就什么也不做
+        val forLocalAsr = RecordingController.consumePendingLocalAsr()
+        if (forLocalAsr && granted) {
+            FileLogger.i(TAG, "麦克风已授权 → 接着开始本机录音")
+            runCatching { FloatingBallService.start(this) }
+            RecordingController.start(this, VoiceDestination.LOCAL_ASR)
+        } else if (forLocalAsr) {
+            Toast.makeText(this, "没有麦克风权限，录不了音", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Permissions.refresh(this)
@@ -52,6 +77,7 @@ class MainActivity : ComponentActivity() {
         if (handleShareIntent(intent)) return
         handleClipboardIntent(intent)
         handlePanelIntent(intent)
+        handleMicIntent(intent)
         setContent {
             ClipTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -87,6 +113,14 @@ class MainActivity : ComponentActivity() {
         if (handleShareIntent(intent)) return
         handleClipboardIntent(intent)
         handlePanelIntent(intent)
+        handleMicIntent(intent)
+    }
+
+    /** 悬浮窗里的「录音」按钮没有权限时把用户拉到这里来申请。 */
+    private fun handleMicIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_REQUEST_MIC, false) != true) return
+        intent.removeExtra(EXTRA_REQUEST_MIC)
+        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     /** 后台通知点开：读 Room 内容写剪贴板（此时已在前台）。 */
@@ -147,6 +181,7 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "MainActivity"
         const val EXTRA_CLIPBOARD_LOCAL_ID = "extra_clipboard_local_id"
         const val EXTRA_PANEL_ACTION = "extra_panel_action"
+        const val EXTRA_REQUEST_MIC = "extra_request_mic"
         const val PANEL_OPEN = "open"
         const val PANEL_TOGGLE = "toggle"
     }

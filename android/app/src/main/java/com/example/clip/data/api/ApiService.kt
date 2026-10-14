@@ -54,4 +54,51 @@ interface ApiService {
         @Path("recordId") recordId: String,
         @Body body: PatchRecordRequest
     ): ApiResponse<RecordDto>
+
+    // App 使用时长上报：一批原始事件进去，后端配对/去重后写 usage_records。
+    @POST("api/v1/usage")
+    suspend fun reportUsage(@Body body: UsageReportRequest): ApiResponse<UsageReportData>
+
+    // ── Lattice 远程（转发到电脑上的 Lattice 数据口）──────────────
+    // 这些是剪藏后端的转发接口（要 X-Token，拦截器自动带）。ref 只传裸 pane-N。
+
+    @GET("api/v1/lattice/health")
+    suspend fun latticeHealth(): ApiResponse<LatticeHealthDto>
+
+    @GET("api/v1/lattice/panes")
+    suspend fun latticePanes(): ApiResponse<LatticePanesDto>
+
+    @GET("api/v1/lattice/panes/{ref}/status")
+    suspend fun latticeStatus(@Path("ref") ref: String): ApiResponse<LatticeStatusDto>
+
+    // mode / lines / maxBytes 传 null 时 Retrofit 不会带这个 query ——
+    // 必须这样：Lattice 的默认值在它自己那边，替它补一个假值会被它的 clamp 拉成最小值。
+    @GET("api/v1/lattice/panes/{ref}/text")
+    suspend fun latticeText(
+        @Path("ref") ref: String,
+        @Query("mode") mode: String? = "screen",
+        @Query("lines") lines: Int? = null,
+        @Query("maxBytes") maxBytes: Int? = null
+    ): ApiResponse<LatticeScreenDto>
+
+    @GET("api/v1/lattice/panes/{ref}/last-turn")
+    suspend fun latticeLastTurn(
+        @Path("ref") ref: String,
+        @Query("maxBytes") maxBytes: Int? = null
+    ): ApiResponse<LatticeLastTurnDto>
+
+    @POST("api/v1/lattice/panes/{ref}/input")
+    suspend fun latticeInput(
+        @Path("ref") ref: String,
+        @Body body: LatticeInputRequest
+    ): ApiResponse<LatticeInputDto>
+
+    @POST("api/v1/lattice/panes/{ref}/answer")
+    suspend fun latticeAnswer(
+        @Path("ref") ref: String,
+        @Body body: LatticeAnswerRequest
+    ): ApiResponse<LatticeAnswerDto>
+
+    @POST("api/v1/lattice/watch")
+    suspend fun latticeWatch(@Body body: LatticeWatchRequest): ApiResponse<LatticeWatchDto>
 }

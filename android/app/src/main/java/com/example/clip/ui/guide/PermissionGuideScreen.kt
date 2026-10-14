@@ -28,8 +28,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.clip.util.Permissions
 
 /**
- * 首次启动引导页：悬浮窗（必过）+ 通知（推荐）。
- * 悬浮窗未授权时"进入剪藏"不可点。
+ * 首次启动引导页：悬浮窗（必过）+ 通知（推荐）+ 使用情况访问（推荐）。
+ * 悬浮窗未授权时"进入剪藏"不可点；**后两项都不阻塞**。
  */
 @Composable
 fun PermissionGuideScreen(
@@ -39,6 +39,8 @@ fun PermissionGuideScreen(
     val context = LocalContext.current
     val overlay by Permissions.overlay.collectAsStateWithLifecycle()
     val notification by Permissions.notification.collectAsStateWithLifecycle()
+    val usage by Permissions.usage.collectAsStateWithLifecycle()
+    val battery by Permissions.batteryExempt.collectAsStateWithLifecycle()
 
     Scaffold { padding ->
         Column(
@@ -73,6 +75,29 @@ fun PermissionGuideScreen(
                 required = false,
                 actionLabel = "去开启",
                 onAction = onRequestNotification
+            )
+            // 第 3 项。**它是特殊权限，没有授权弹窗** —— 只能跳系统设置，用户自己打开，
+            // 回来时 MainActivity.onResume 会重查（Permissions.refresh）。
+            GuideCard(
+                title = "使用情况访问",
+                desc = "推荐开启；开启后才会采集各 App 的使用时长（只有时长和包名，不读内容）。" +
+                    "不开启也能正常剪藏，只是不采集这一项。",
+                granted = usage,
+                required = false,
+                actionLabel = "去开启",
+                onAction = { Permissions.openUsageSettings(context) }
+            )
+            // 第 4 项（2026-10-12 加）。🔴 **它管的不是"能不能采"，是"多久采一次"** ——
+            // 不进白名单时 Doze / 后台冻结会把定时采集往后推（实测间隔最长 26 分钟，
+            // 而注册的是 15 分钟）。所以它的文案不能写成"不开就没有数据"。
+            GuideCard(
+                title = "电池优化白名单",
+                desc = "推荐开启；不开时系统会把后台采集推迟（实测最长 26 分钟才采一次），" +
+                    "开启后才会稳定在 15 分钟。不开启也照样采集，只是时间点不准。",
+                granted = battery,
+                required = false,
+                actionLabel = "去设置",
+                onAction = { Permissions.openBatterySettings(context) }
             )
 
             Spacer(Modifier.height(8.dp))
